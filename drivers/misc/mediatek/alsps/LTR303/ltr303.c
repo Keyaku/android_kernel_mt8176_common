@@ -814,7 +814,13 @@ static int ltr303_init_client(void)
 	mdelay(PON_DELAY);
 
 	part_id = ltr303_i2c_read_reg(LTR303_PART_ID);
-	printk("alps part id =0x%x\n",part_id);
+	if (part_id < 0)
+		APS_ERR("PART_ID i2c read FAIL res=%d (chip not answering on i2c%d@0x%02x)\n",
+			part_id, client->adapter->nr, client->addr);
+	else if ((part_id & 0xF0) != 0xA0)
+		APS_ERR("PART_ID mismatch =0x%02x (expected 0xAx for LTR303 - wrong chip?)\n", part_id);
+	else
+		APS_ERR("PART_ID =0x%02x OK\n", part_id);
 	// Enable ALS to Full Range at startup
 	als_gainrange = ALS_RANGE_64K;
 	init_als_gain = als_gainrange;
