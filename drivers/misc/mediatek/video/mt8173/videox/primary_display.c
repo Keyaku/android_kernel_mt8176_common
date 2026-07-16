@@ -4999,6 +4999,7 @@ int primary_display_get_info(void *info)
 	if (1600 == dispif_info->displayHeight)
 		dispif_info->displayHeight = 1536;
 #endif	// end modify
+	dispif_info->density = DISP_GetDensity();
 	dispif_info->vsyncFPS = pgc->lcm_fps;
 
 	if (dispif_info->displayWidth * dispif_info->displayHeight <= 240 * 432)
@@ -5365,6 +5366,19 @@ uint32_t DISP_GetActiveWidth(void)
 	DISPERR("lcm_params is null!\n");
 	return 0;
 
+}
+
+uint32_t DISP_GetDensity(void)
+{
+	if (pgc->plcm == NULL) {
+		DISPERR("lcm handle is null!\n");
+		return 0;
+	}
+	if (pgc->plcm->params)
+		return pgc->plcm->params->density;
+
+	DISPERR("lcm_params is null!\n");
+	return 0;
 }
 
 LCM_PARAMS *DISP_GetLcmPara(void)

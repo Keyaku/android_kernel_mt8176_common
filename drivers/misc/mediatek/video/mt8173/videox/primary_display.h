@@ -221,6 +221,7 @@ uint32_t DISP_GetFBRamSize(void);
 uint32_t DISP_GetPages(void);
 uint32_t DISP_GetScreenBpp(void);
 uint32_t DISP_GetScreenWidth(void);
+uint32_t DISP_GetDensity(void);
 uint32_t DISP_GetScreenHeight(void);
 uint32_t DISP_GetActiveHeight(void);
 uint32_t DISP_GetActiveWidth(void);

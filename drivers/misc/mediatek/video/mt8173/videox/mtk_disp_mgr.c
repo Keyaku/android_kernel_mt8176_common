@@ -1451,53 +1451,61 @@ int _ioctl_set_input_buffer(unsigned long arg)
 	int ret = 0;
 	void __user *argp = (void __user *)arg;
 	unsigned int session_id = 0;
-	disp_session_input_config session_input;
 	disp_session_sync_info *session_info;
+	disp_session_input_config *s_session_input;
 
-	if (copy_from_user(&session_input, argp, sizeof(session_input))) {
+	s_session_input = kmalloc(sizeof(disp_session_input_config), GFP_KERNEL);
+	if (!s_session_input)
+		return -ENOMEM;
+
+	if (copy_from_user(s_session_input, argp, sizeof(disp_session_input_config))) {
 		DISPMSG("[FB]: copy_from_user failed! line:%d\n", __LINE__);
+		kfree(s_session_input);
 		return -EFAULT;
 	}
 
-	session_id = session_input.session_id;
+	session_id = s_session_input->session_id;
 	session_info = disp_get_session_sync_info_for_debug(session_id);
 	if (session_info)
-		dprec_start(&session_info->event_setinput, 0, session_input.config_layer_num);
+		dprec_start(&session_info->event_setinput, 0, s_session_input->config_layer_num);
 
 	DISPPR_FENCE("S+/%s%d/count%d\n", disp_session_mode_spy(session_id),
-		     DISP_SESSION_DEV(session_id), session_input.config_layer_num);
+		     DISP_SESSION_DEV(session_id), s_session_input->config_layer_num);
 
 	DISP_PRINTF(DDP_RESOLUTION_LOG,
 		    "set_input_buffer/%s%d/count%d src(%d %d %d %d, %d) en %d fmt 0x%x dst(%d %d %d %d)\n",
 		    disp_session_mode_spy(session_id),
 		    DISP_SESSION_DEV(session_id),
-		    session_input.config_layer_num,
-		    session_input.config[0].src_offset_x,
-		    session_input.config[0].src_offset_y,
-		    session_input.config[0].src_width,
-		    session_input.config[0].src_height,
-		    session_input.config[0].src_pitch,
-		    session_input.config[0].layer_enable,
-		    session_input.config[0].src_fmt,
-		    session_input.config[0].tgt_offset_x,
-		    session_input.config[0].tgt_offset_y,
-		    session_input.config[0].tgt_width, session_input.config[0].tgt_height);
+		    s_session_input->config_layer_num,
+		    s_session_input->config[0].src_offset_x,
+		    s_session_input->config[0].src_offset_y,
+		    s_session_input->config[0].src_width,
+		    s_session_input->config[0].src_height,
+		    s_session_input->config[0].src_pitch,
+		    s_session_input->config[0].layer_enable,
+		    s_session_input->config[0].src_fmt,
+		    s_session_input->config[0].tgt_offset_x,
+		    s_session_input->config[0].tgt_offset_y,
+		    s_session_input->config[0].tgt_width, s_session_input->config[0].tgt_height);
 
 	if (DISP_SESSION_TYPE(session_id) == DISP_SESSION_PRIMARY)
-		ret = set_primary_buffer(session_input);
+		ret = set_primary_buffer(*s_session_input);
 	else if (DISP_SESSION_TYPE(session_id) == DISP_SESSION_EXTERNAL) {
 		MMProfileLogEx(ddp_mmp_get_events()->Extd_config,
 			       MMProfileFlagPulse, session_id, 0);
-		ret = set_external_buffer(session_input);
+		ret = set_external_buffer(*s_session_input);
 	} else if (DISP_SESSION_TYPE(session_id) == DISP_SESSION_MEMORY)
-		ret = set_memory_buffer(session_input);
+		ret = set_memory_buffer(*s_session_input);
 	else {
 		DISPERR("session type is wrong:0x%08x\n", session_id);
+		kfree(s_session_input);
 		return -1;
 	}
 
 	if (session_info)
-		dprec_done(&session_info->event_setinput, 0, session_input.config_layer_num);
+		dprec_done(&session_info->event_setinput, 0, s_session_input->config_layer_num);
+
+	kfree(s_session_input);
 
 	return ret;
 }
@@ -1776,6 +1784,56 @@ int _ioctl_set_output_buffer(unsigned long arg)
 	return ret;
 }
 
+
+/* Ported from the ALLDOCUBE X BSP (third_party/lineageos_kernel_cube_u1005)
+ * — the real 60-byte disp_caps_info the vendor HWC blob expects.
+ * See PORTING_LOG §55. */
+int _ioctl_get_display_caps(unsigned long arg)
+{
+	int ret = 0;
+	disp_caps_info caps_info;
+	void __user *argp = (void __user *)arg;
+
+	if (copy_from_user(&caps_info, argp, sizeof(caps_info))) {
+		DISPMSG("[FB]: copy_to_user failed! line:%d\n", __LINE__);
+		ret = -EFAULT;
+	}
+#ifdef DISP_HW_MODE_CAP
+	caps_info.output_mode = DISP_HW_MODE_CAP;
+#else
+	caps_info.output_mode = DISP_OUTPUT_CAP_DIRECT_LINK;
+#endif
+
+#ifdef DISP_HW_PASS_MODE
+	caps_info.output_pass = DISP_HW_PASS_MODE;
+#else
+	caps_info.output_pass = DISP_OUTPUT_CAP_SINGLE_PASS;
+#endif
+
+#ifdef DISP_HW_MAX_LAYER
+	caps_info.max_layer_num = DISP_HW_MAX_LAYER;
+#else
+	caps_info.max_layer_num = 4;
+#endif
+
+	caps_info.disp_feature = 0;
+	caps_info.is_support_frame_cfg_ioctl = 0;
+#ifdef OVL_TIME_SHARING
+	caps_info.disp_feature |= DISP_FEATURE_TIME_SHARING;
+#endif
+
+	caps_info.disp_feature |= DISP_FEATURE_NO_PARGB;
+
+	DISPMSG("%s mode:%d, pass:%d, max_layer_num:%d\n",
+		__func__, caps_info.output_mode, caps_info.output_pass, caps_info.max_layer_num);
+
+	if (copy_to_user(argp, &caps_info, sizeof(caps_info))) {
+		DISPMSG("[FB]: copy_to_user failed! line:%d\n", __LINE__);
+		ret = -EFAULT;
+	}
+
+	return ret;
+}
 
 int _ioctl_get_info(unsigned long arg)
 {
@@ -2170,6 +2228,26 @@ long mtk_disp_mgr_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	case DISP_IOCTL_PQ_SET_DC_PARAM:
 		{
 			ret = primary_display_user_cmd(cmd, arg);
+			break;
+		}
+	case DISP_IOCTL_GET_DISPLAY_CAPS:
+		{
+			ret = _ioctl_get_display_caps(arg);
+			break;
+		}
+	case DISP_IOCTL_GET_LCMINDEX:
+		{
+			ret = 0;
+			break;
+		}
+	/* DISP_IOCTL_GET_IS_DRIVER_SUSPEND: raw ioctl 0x40044fd9 = _IOW('O',217,4). */
+	case 0x40044fd9:
+		{
+			unsigned int suspended = 0;
+			if (copy_to_user((void __user *)arg, &suspended, sizeof(suspended)))
+				ret = -EFAULT;
+			else
+				ret = 0;
 			break;
 		}
 	default:

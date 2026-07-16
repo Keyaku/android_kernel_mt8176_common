@@ -1946,7 +1946,8 @@ continue_resched:
 #define F_ALL_SEALS (F_SEAL_SEAL | \
 		     F_SEAL_SHRINK | \
 		     F_SEAL_GROW | \
-		     F_SEAL_WRITE)
+		     F_SEAL_WRITE | \
+		     F_SEAL_FUTURE_WRITE)
 
 int shmem_add_seals(struct file *file, unsigned int seals)
 {

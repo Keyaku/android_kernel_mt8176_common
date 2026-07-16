@@ -17,6 +17,7 @@ MMP_Event ION_MMP_Events[PROFILE_MAX];
 
 void ion_profile_init(void)
 {
+#ifdef DEFAULT_MMP_ENABLE
 	MMP_Event ION_Event;
 
 	MMProfileEnable(1);
@@ -49,4 +50,5 @@ void ion_profile_init(void)
 	MMProfileEnableEvent(ION_MMP_Events[PROFILE_DMA_FLUSH_ALL], 1);
 	MMProfileEnableEvent(ION_MMP_Events[PROFILE_DMA_INVALID_ALL], 1);
 	MMProfileStart(1);
+#endif
 }

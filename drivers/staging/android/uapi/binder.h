@@ -32,11 +32,27 @@ enum {
 	BINDER_TYPE_HANDLE	= B_PACK_CHARS('s', 'h', '*', B_TYPE_LARGE),
 	BINDER_TYPE_WEAK_HANDLE	= B_PACK_CHARS('w', 'h', '*', B_TYPE_LARGE),
 	BINDER_TYPE_FD		= B_PACK_CHARS('f', 'd', '*', B_TYPE_LARGE),
+	BINDER_TYPE_FDA		= B_PACK_CHARS('f', 'd', 'a', B_TYPE_LARGE),
+	BINDER_TYPE_PTR		= B_PACK_CHARS('p', 't', '*', B_TYPE_LARGE),
 };
 
 enum {
 	FLAT_BINDER_FLAG_PRIORITY_MASK = 0xff,
 	FLAT_BINDER_FLAG_ACCEPTS_FDS = 0x100,
+};
+
+/**
+ * struct binder_object_header - header shared by all binder metadata objects
+ * @type:	type of the object
+ *
+ * Every binder object starts with a 4-byte type field. The kernel reads
+ * this field to determine the object type, then casts to the appropriate
+ * struct. The legacy flat_binder_object begins with type+flags directly;
+ * the SG-era structs (binder_fd_object, binder_buffer_object,
+ * binder_fd_array_object) embed this header as their first member.
+ */
+struct binder_object_header {
+	__u32	type;
 };
 
 #ifdef BINDER_IPC_32BIT
@@ -67,6 +83,76 @@ struct flat_binder_object {
 
 	/* extra data associated with local object */
 	binder_uintptr_t	cookie;
+};
+
+/**
+ * struct binder_fd_object - describes a file descriptor to be transferred
+ * @hdr:	binder object header
+ * @pad_flags:	padding (must be zero)
+ * @pad_binder:	union with @fd (padding, must be zero when @fd is used)
+ * @fd:		file descriptor (in the @pad_binder union, low 32 bits)
+ * @cookie:	optional cookie (unused for pure fd transfer)
+ *
+ * This is the SG-enabled form for BINDER_TYPE_FD. The legacy
+ * flat_binder_object also carries fds via BINDER_TYPE_FD using its
+ * handle/binder fields; the kernel accepts both forms.
+ */
+struct binder_fd_object {
+	struct binder_object_header	hdr;
+	__u32				pad_flags;
+	union {
+		binder_uintptr_t	pad_binder;
+		__u32			fd;
+	};
+	binder_uintptr_t		cookie;
+};
+
+/**
+ * struct binder_buffer_object - describes a userspace buffer to be transferred
+ * @hdr:	binder object header
+ * @flags:	one or more BINDER_BUFFER_FLAG_* values
+ * @buffer:	userspace pointer to the buffer
+ * @length:	size of the buffer in bytes
+ * @parent:	index in the offset array pointing to the parent buffer
+ * @parent_offset:offset within the parent buffer where this buffer's pointer
+ *		should be fixed up
+ *
+ * Carries an arbitrary userspace buffer that the driver copies into the
+ * transaction's extra (scatter-gather) buffer area, fixing up the pointer so
+ * the recipient sees a valid address in its own address space. Parent/child
+ * links allow nesting (e.g. an array of fds living inside a parent buffer).
+ */
+struct binder_buffer_object {
+	struct binder_object_header	hdr;
+	__u32				flags;
+	binder_uintptr_t		buffer;
+	binder_size_t			length;
+	binder_size_t			parent;
+	binder_size_t			parent_offset;
+};
+
+/**
+ * struct binder_fd_array_object - an array of fds embedded in a parent buffer
+ * @hdr:	binder object header
+ * @pad:	padding (must be zero)
+ * @num_fds:	number of file descriptors in the array
+ * @parent:	index in the offset array of the parent binder_buffer_object
+ * @parent_offset:offset within the parent buffer where the fd array begins
+ *
+ * The driver walks the array, translates each fd into the target process's
+ * fd table, and writes the translated fds back into the (already-fixup'd)
+ * parent buffer.
+ */
+struct binder_fd_array_object {
+	struct binder_object_header	hdr;
+	__u32				pad;
+	binder_size_t			num_fds;
+	binder_size_t			parent;
+	binder_size_t			parent_offset;
+};
+
+enum {
+	BINDER_BUFFER_FLAG_HAS_PARENT = 0x01,
 };
 
 /*
@@ -164,6 +250,24 @@ struct binder_transaction_data {
 struct binder_ptr_cookie {
 	binder_uintptr_t ptr;
 	binder_uintptr_t cookie;
+};
+
+/**
+ * struct binder_transaction_data_sg - transaction data with scatter-gather
+ * @transaction_data:	the base transaction data (same layout as
+ *			binder_transaction_data)
+ * @buffers_size:	total size of the extra (scatter-gather) buffer area
+ *			that follows the offsets array. Contains the sum of
+ *			all BINDER_TYPE_PTR buffer lengths referenced from
+ *			the offsets array.
+ *
+ * Used by BC_TRANSACTION_SG / BC_REPLY_SG. The kernel allocates
+ * @buffers_size additional bytes in the target buffer (after the offsets
+ * array) and copies each BINDER_TYPE_PTR buffer into it, fixing up pointers.
+ */
+struct binder_transaction_data_sg {
+	struct binder_transaction_data transaction_data;
+	binder_size_t buffers_size;
 };
 
 struct binder_handle_cookie {
@@ -344,6 +448,13 @@ enum binder_driver_command_protocol {
 	BC_DEAD_BINDER_DONE = _IOW('c', 16, binder_uintptr_t),
 	/*
 	 * void *: cookie
+	 */
+
+	BC_TRANSACTION_SG = _IOW('c', 17, struct binder_transaction_data_sg),
+	BC_REPLY_SG = _IOW('c', 18, struct binder_transaction_data_sg),
+	/*
+	 * binder_transaction_data_sg: the sent command, plus the total size of
+	 * the scatter-gather buffer area.
 	 */
 };
 

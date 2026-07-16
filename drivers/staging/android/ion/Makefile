@@ -14,9 +14,16 @@ obj-$(CONFIG_MTK_ION) += mtk/
 
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/mmp/
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/include/mt-plat
+ccflags-y += -I$(srctree)/drivers/misc/mediatek/secmem/
+ccflags-y += -I$(srctree)/drivers/misc/mediatek/secmem/$(MTK_PLATFORM)/
 
+ccflags-y += -DION_HISTORY_RECORD
 ifeq ($(CONFIG_MT_ENG_BUILD), y)
 ccflags-y += -DION_RUNTIME_DEBUGGER=1
 else
 ccflags-y += -DION_RUNTIME_DEBUGGER=0
+endif
+
+ifeq ($(CONFIG_MMPROFILE),y)
+ccflags-y += -DDEFAULT_MMP_ENABLE
 endif
