@@ -1255,6 +1255,7 @@ static int mtkfb_ioctl(struct fb_info *info, unsigned int cmd, unsigned long arg
 			} else {
 				MTKFB_ERR("information for displayid: %d is not available now\n",
 					  displayid);
+				return -EFAULT;
 			}
 
 			if (copy_to_user
@@ -1705,6 +1706,7 @@ static int mtkfb_compat_ioctl(struct fb_info *info, unsigned int cmd, unsigned l
 			} else {
 				DISPERR("information for displayid: %d is not available now\n",
 				displayid);
+				return -EFAULT;
 			}
 
 			if (copy_to_user((void __user *)arg,

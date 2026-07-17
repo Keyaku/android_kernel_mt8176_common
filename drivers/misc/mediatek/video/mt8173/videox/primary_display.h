@@ -184,6 +184,8 @@ typedef struct {
 extern unsigned int is_hwc_enabled;
 
 int primary_display_set_frame_buffer_address(unsigned long va, unsigned long mva);
+int is_dim_layer(unsigned int long mva);
+unsigned long get_dim_layer_mva_addr(void);
 unsigned long primary_display_get_frame_buffer_mva_address(void);
 unsigned long primary_display_get_frame_buffer_va_address(void);
 typedef int (*PRIMARY_DISPLAY_CALLBACK) (unsigned int user_data);

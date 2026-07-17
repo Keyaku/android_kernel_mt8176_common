@@ -649,8 +649,10 @@ int _ioctl_prepare_present_fence(unsigned long arg)
 	}
 
 	if (use_present_fence == 0) {
+#if 0
 		DISPERR("non-primary ask for present fence! session=0x%x\n",
 			preset_fence_struct.session_id);
+#endif
 		data.fence = MTK_FB_INVALID_FENCE_FD;
 		data.value = 0;
 	} else {
@@ -1167,6 +1169,18 @@ static int set_memory_buffer(disp_session_input_config session_input)
 		dst_mva = 0;
 		layer_id = session_input.config[i].layer_id;
 		if (session_input.config[i].layer_enable) {
+			if (session_input.config[i].buffer_source == DISP_BUFFER_ALPHA) {
+				DISPPR_FENCE("ML %d is dim layer,fence %d\n",
+						session_input.config[i].layer_id,
+						session_input.config[i].next_buff_idx);
+				session_input.config[i].sur_aen = 0;
+				session_input.config[i].src_fmt = DISP_FORMAT_RGB888;
+				session_input.config[i].src_pitch = session_input.config[i].src_width;
+				session_input.config[i].src_phy_addr = (void *)get_dim_layer_mva_addr();
+				session_input.config[i].next_buff_idx = 0;
+				session_input.config[i].security = DISP_NORMAL_BUFFER;
+			}
+
 			if (session_input.config[i].src_phy_addr) {
 				dst_mva =
 				    (unsigned int)(unsigned long)session_input.
@@ -1251,11 +1265,31 @@ static int set_external_buffer(disp_session_input_config session_input)
 		dst_mva = 0;
 		layer_id = session_input.config[i].layer_id;
 		if (session_input.config[i].layer_enable) {
+			if (session_input.config[i].buffer_source == DISP_BUFFER_ALPHA) {
+				DISPPR_FENCE("EL %d is dim layer,fence %d\n",
+						session_input.config[i].layer_id,
+						session_input.config[i].next_buff_idx);
+				session_input.config[i].src_offset_x = 0;
+				session_input.config[i].src_offset_y = 0;
+				/* session_input.config[i].tgt_offset_x = 0; */
+				/* session_input.config[i].tgt_offset_y = 0; */
+				session_input.config[i].sur_aen = 0;
+				session_input.config[i].src_fmt = DISP_FORMAT_RGB888;
+				session_input.config[i].src_pitch = session_input.config[i].src_width;
+				session_input.config[i].src_phy_addr = (void *)get_dim_layer_mva_addr();
+				session_input.config[i].next_buff_idx = 0;
+				/* force dim layer as non-sec */
+				session_input.config[i].security = DISP_NORMAL_BUFFER;
+			}
+
 			if (session_input.config[i].src_phy_addr) {
 				dst_mva =
 				    (unsigned int)(unsigned long)session_input.
 				    config[i].src_phy_addr;
 			} else {
+				if ((is_hdmi_active() == false) || (ext_disp_get_state() != 2))
+					;
+				else
 				disp_sync_query_buf_info(session_id, layer_id, (unsigned int)
 							 session_input.config[i].next_buff_idx,
 							 &dst_mva, &dst_size);
@@ -1366,6 +1400,21 @@ static int set_primary_buffer(disp_session_input_config session_input)
 		}
 
 		if (session_input.config[i].layer_enable) {
+			if (session_input.config[i].buffer_source == DISP_BUFFER_ALPHA) {
+				DISPPR_FENCE("PL %d is dim layer,fence %d\n",
+						session_input.config[i].layer_id,
+						session_input.config[i].next_buff_idx);
+				session_input.config[i].src_offset_x = 0;
+				session_input.config[i].src_offset_y = 0;
+				session_input.config[i].sur_aen = 0;
+				session_input.config[i].src_fmt = DISP_FORMAT_RGB888;
+				session_input.config[i].src_pitch = session_input.config[i].src_width;
+				session_input.config[i].src_phy_addr = (void *)get_dim_layer_mva_addr();
+				session_input.config[i].next_buff_idx = 0;
+				/* force dim layer as non-sec */
+				session_input.config[i].security = DISP_NORMAL_BUFFER;
+			}
+
 			if (session_input.config[i].src_phy_addr) {
 				dst_mva =
 				    (unsigned int)(unsigned long)session_input.
@@ -1895,6 +1944,17 @@ int _ioctl_wait_vsync(unsigned long arg)
 	ret = ext_disp_wait_for_vsync(&vsync_config);
 
 #else
+	if (DISP_SESSION_TYPE(vsync_config.session_id) == DISP_SESSION_EXTERNAL) {
+#ifdef CONFIG_MTK_HDMI_SUPPORT
+		ret = ext_disp_wait_for_vsync(&vsync_config);
+		/* ext path not up yet (hotplug race) or ext vsync event timed out:
+		 * pace the HWC dispatcher off primary's 60 Hz vsync instead of
+		 * starving it (starved dispatcher -> unclosed acquire fd abort). */
+		if (ret <= 0)
+			ret = primary_display_wait_for_vsync(&vsync_config);
+#endif
+	}
+	else
 	ret = primary_display_wait_for_vsync(&vsync_config);
 #endif
 
