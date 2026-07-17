@@ -1,0 +1,27 @@
+CompileFlags:
+  Add:
+    - -target
+    - aarch64-linux-android
+    - -isystem
+    - /mnt/antion/Data/android/GPD/XD+/reversing/.kbuild/kout_delta/arch/arm64/include
+    - -isystem
+    - /mnt/antion/Data/android/GPD/XD+/reversing/.kbuild/kout_delta/usr/include
+    - -isystem
+    - /mnt/antion/Data/android/GPD/XD+/reversing/.kbuild/kout_delta/include
+    - -isystem
+    - /mnt/antion/Data/android/GPD/XD+/reversing/sources/android_kernel_mt8176_common/arch/arm64/include
+    - -isystem
+    - /mnt/antion/Data/android/GPD/XD+/reversing/sources/android_kernel_mt8176_common/arch/arm64/include/uapi
+    - -isystem
+    - /mnt/antion/Data/android/GPD/XD+/reversing/sources/android_kernel_mt8176_common/arch/arm64/include/generated/uapi
+    - -isystem
+    - /mnt/antion/Data/android/GPD/XD+/reversing/sources/android_kernel_mt8176_common/include
+    - -isystem
+    - /mnt/antion/Data/android/GPD/XD+/reversing/sources/android_kernel_mt8176_common/include/uapi
+    - -isystem
+    - /mnt/antion/Data/android/GPD/XD+/reversing/sources/android_kernel_mt8176_common/include/generated/uapi
+    - -isystem
+    - /mnt/antion/Data/android/GPD/XD+/reversing/sources/los18/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/lib/gcc/aarch64-linux-android/4.9.x/include
+  Remove:
+    - -isystem
+    - -I

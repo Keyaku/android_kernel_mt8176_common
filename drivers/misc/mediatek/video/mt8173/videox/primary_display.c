@@ -94,6 +94,7 @@ int primary_display_use_cmdq = CMDQ_DISABLE;
 int primary_display_use_m4u = 1;
 DISP_PRIMARY_PATH_MODE primary_display_mode = DIRECT_LINK_MODE;
 
+static unsigned long dim_layer_mva;
 static unsigned long dc_vAddr[DISP_INTERNAL_BUFFER_COUNT];
 #if defined(MTK_ALPS_BOX_SUPPORT)
 #else
@@ -2642,6 +2643,27 @@ int primary_display_set_frame_buffer_address(unsigned long va, unsigned long mva
     memset(dim_layer_va, 0, frame_buffer_size);
 */
 	return 0;
+}
+
+int is_dim_layer(unsigned int long mva)
+{
+	if (mva == dim_layer_mva)
+		return 1;
+	return 0;
+}
+
+unsigned long get_dim_layer_mva_addr(void)
+{
+	if (dim_layer_mva == 0) {
+		int frame_buffer_size = ALIGN_TO(DISP_GetScreenWidth(), MTK_FB_ALIGNMENT) *
+			ALIGN_TO(DISP_GetScreenHeight(), MTK_FB_ALIGNMENT) * 4;
+		unsigned long dim_layer_va = pgc->framebuffer_va + 1 * frame_buffer_size;
+
+		memset_io((void *)dim_layer_va, 0, frame_buffer_size * 2);
+		dim_layer_mva = pgc->framebuffer_mva + 1 * frame_buffer_size;
+		DISPMSG("init dim layer mva %lu, size %d", dim_layer_mva, frame_buffer_size * 2);
+	}
+	return dim_layer_mva;
 }
 
 unsigned long primary_display_get_frame_buffer_mva_address(void)
