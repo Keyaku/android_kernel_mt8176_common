@@ -45,6 +45,8 @@ static int joy_power_io;
 struct joystick_ts_data {
 	struct i2c_client *client;
 	int irq;
+	bool irq_disabled;
+	bool suspended;
 	struct work_struct pen_event_work;
 	struct workqueue_struct *ts_workqueue;
 };
@@ -108,11 +110,33 @@ static irqreturn_t joystick_interrupt(int irq, void *dev_id)
 	struct joystick_ts_data *joystick_ts = dev_id;
 
 	//disable_irq_nosync(joystick_ts->irq);
-	if (!work_pending(&joystick_ts->pen_event_work)) 
+	/* Belt and braces: an assert racing the mask must not queue a read that
+	 * would run with the framework asleep. */
+	if (joystick_ts->suspended)
+		return IRQ_HANDLED;
+
+	if (!work_pending(&joystick_ts->pen_event_work))
 		queue_work(joystick_ts->ts_workqueue, &joystick_ts->pen_event_work);
 
 	return IRQ_HANDLED;
 }
+
+/*
+ * GPD XD+ standby drain fix.
+ *
+ * This driver owns the two analog sticks only (it reads 4 axes from the MCU at
+ * i2c 0x46). The stick MCU asserts EINT104 at ~126 Hz whether or not anything is
+ * touched, and each assert costs a threaded IRQ + an i2c transfer + a workqueue
+ * item. Left armed across suspend it drags the SoC out of sleep 126 times a
+ * second, so the system never reaches a real suspend: heavy standby drain and a
+ * chassis that stays warm with the lid shut.
+ *
+ * Mask the IRQ for the duration of suspend. Nothing is lost: a stick deflection
+ * could not usefully wake the device anyway, since the MCU asserts continuously
+ * and any armed wake would fire immediately and permanently. Button wake is
+ * unaffected - it comes from neither this driver nor adc_js (whose GPIO poll
+ * timer is already stopped at screen-off).
+ */
 
 static int joystick_suspend(struct device *dev)
 {
@@ -120,7 +144,14 @@ static int joystick_suspend(struct device *dev)
 	joystick_ts = dev_get_drvdata(dev);
 
 	printk("### %s ###\n", __func__);
-	//disable_irq_nosync(joystick_ts->irq);
+	joystick_ts->suspended = true;
+	if (!joystick_ts->irq_disabled) {
+		/* disable_irq() waits for the threaded handler to finish, so no
+		 * work can be queued behind us. */
+		disable_irq(joystick_ts->irq);
+		joystick_ts->irq_disabled = true;
+	}
+	flush_work(&joystick_ts->pen_event_work);
 #if POWER_IO
         gpio_set_value(joy_power_io, 0);
 #endif
@@ -136,8 +167,11 @@ static int joystick_resume(struct device *dev)
 #if POWER_IO
         gpio_set_value(joy_power_io, 1);
 #endif
-	//msleep(10);
-	//enable_irq(joystick_ts->irq);
+	joystick_ts->suspended = false;
+	if (joystick_ts->irq_disabled) {
+		enable_irq(joystick_ts->irq);
+		joystick_ts->irq_disabled = false;
+	}
 	return 0;
 }
 
