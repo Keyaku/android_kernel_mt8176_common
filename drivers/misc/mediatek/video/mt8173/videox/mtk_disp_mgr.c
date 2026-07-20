@@ -550,7 +550,10 @@ int _ioctl_trigger_session(unsigned long arg)
 #ifdef CONFIG_MTK_HDMI_SUPPORT
 		mutex_lock(&disp_session_lock);
 
-#if defined(MTK_ALPS_BOX_SUPPORT)
+#if defined(MTK_ALPS_BOX_SUPPORT) || defined(CONFIG_MTK_HDMI_SUPPORT)
+		/* Matches the prepare side above: hand the freshly prepared
+		 * present fence index to the ext path so its release worker can
+		 * signal it on IF_VSYNC. */
 		if (config.present_fence_idx != -1) {
 			ext_disp_update_present_fence(config.present_fence_idx);
 			MMProfileLogEx(ddp_mmp_get_events()->Extd_present_fence_set,
@@ -637,7 +640,13 @@ int _ioctl_prepare_present_fence(unsigned long arg)
 		use_present_fence = 1;
 		break;
 
-#if defined(MTK_ALPS_BOX_SUPPORT)
+#if defined(MTK_ALPS_BOX_SUPPORT) || defined(CONFIG_MTK_HDMI_SUPPORT)
+	/* Without this the external session is handed an invalid present fence
+	 * (fd -1, idx 0), the composer logs "Failed to get presentFence" and
+	 * triggers the session with no present fence, so the sub_disp path is
+	 * never started and RDMA1 stays at ENGINE_EN=0 ("No signal"). The
+	 * release worker and timeline this needs are already built in
+	 * extd_ddp.c; only the box-only gate was hiding them. */
 	case DISP_SESSION_EXTERNAL:
 		use_present_fence = 1;
 		break;
