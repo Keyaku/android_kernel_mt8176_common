@@ -3126,8 +3126,16 @@ static int __init hdmi_init(void)
 #else
 	p->is_mhl_video_on = false;
 #endif
-	if (factory_mode == false)
-		p->is_enabled = true;
+	/* Do NOT preset is_enabled here. MTK_HDMI_AUDIO_VIDEO_ENABLE(1) starts with
+	 * "if (p->is_enabled) break;", and it is the only call site of
+	 * hdmi_drv_init() - so presetting true made hdmi_drv_init() unreachable for
+	 * the whole boot: the RDMA1/RDMA2 disp-IRQ callbacks were never registered
+	 * and hdmi_rdma_config_kthread never created, which is what calls
+	 * hdmi_video_config() (GRL timing + AVI infoframe + TMDS enable). The TX
+	 * then sat at its power-on default with TMDS never turned on. Leaving it
+	 * false makes the first enable do the real init.
+	 */
+	p->is_enabled = false;
 
 	hdmi_drv->init();
 

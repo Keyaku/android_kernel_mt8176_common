@@ -1783,6 +1783,76 @@ void hdmi_drvlog_enable(unsigned short enable)
 	hdmidrv_log_on = enable;
 }
 
+/*----------------------------------------------------------------------------*/
+/* DPI / TMDS output keep-alive                                               */
+/*                                                                            */
+/* Three parts of the output path get torn down behind the display stack's    */
+/* back once an external display is up:                                       */
+/*   - MMSYS gates mm_dpi_pixel/engine (CG_CON1 bit 8-9) on the suspend path   */
+/*     a hotplug blip runs; DPI register writes then land but nothing scans.   */
+/*   - DPI0 EN is cleared by that same teardown.                               */
+/*   - the HDMI PHY TMDS drivers are switched off by tmdsonoff(0), which every */
+/*     MTK_HDMI_VIDEO_CONFIG ioctl issues terminally.                          */
+/* This used to be repaired from user space through the /d/hdmi regw           */
+/* interface, which races the teardown. Do it here from the 10ms hdmi timer    */
+/* instead, but only while the TX is actually plugged in and powered.          */
+/*----------------------------------------------------------------------------*/
+#define DPIKA_MMSYS_CG_CON1	0x14000110
+#define DPIKA_MMSYS_CG_CLR1	0x14000118
+#define DPIKA_MMSYS_DPI_PIXEL	0x00000300	/* CG_CON1 bit 8-9 */
+#define DPIKA_DPI0_EN		0x1401d000
+#define DPIKA_PHY_CON3		0x1020910c
+#define DPIKA_PHY_CON3_DRV	0xff0f0000	/* SER/PRD/DRV all 0xf */
+#define DPIKA_TICKS		50		/* timer ticks between checks */
+
+unsigned char hdmi_dpi_keepalive = 1;
+static unsigned int dpika_tick;
+
+void hdmi_dpi_output_repair(void)
+{
+	unsigned int val = 0;
+
+	/* clock gate first: a gated DPI bank swallows every write */
+	hdmi_read(DPIKA_MMSYS_CG_CON1, &val);
+	if (val & DPIKA_MMSYS_DPI_PIXEL) {
+		hdmi_write(DPIKA_MMSYS_CG_CLR1, DPIKA_MMSYS_DPI_PIXEL);
+		pr_err("[hdmi]dpi keepalive: ungate mm_dpi_pixel (CG_CON1 0x%08x)\n", val);
+	}
+
+	val = 0;
+	hdmi_read(DPIKA_DPI0_EN, &val);
+	if ((val & 0x1) == 0) {
+		hdmi_write(DPIKA_DPI0_EN, 1);
+		pr_err("[hdmi]dpi keepalive: re-enable DPI0\n");
+	}
+
+	/* CON3 only - CON0/CON1 are context specific and CON0 self-morphs */
+	val = 0;
+	hdmi_read(DPIKA_PHY_CON3, &val);
+	if (val != DPIKA_PHY_CON3_DRV) {
+		hdmi_write(DPIKA_PHY_CON3, DPIKA_PHY_CON3_DRV);
+		pr_err("[hdmi]dpi keepalive: restore TMDS drivers (CON3 0x%08x)\n", val);
+	}
+}
+
+void hdmi_dpi_keepalive_set(unsigned int enable)
+{
+	hdmi_dpi_keepalive = enable ? 1 : 0;
+	dpika_tick = 0;
+	pr_err("[hdmi]dpi keepalive = %d\n", hdmi_dpi_keepalive);
+}
+
+/* Runtime setter for the factory full-pipeline one-shot below (compile default
+ * was 0 with no way to reach it from user space). Clearing hdmi2_debug re-arms
+ * it, so this can be fired more than once per boot.
+ */
+void hdmi_dpi_output_set(unsigned int enable)
+{
+	hdmi_dpi_output = enable ? 1 : 0;
+	hdmi2_debug = 0;
+	pr_err("[hdmi]hdmi_dpi_output = %d\n", hdmi_dpi_output);
+}
+
 void hdmi_timer_impl(void)
 {
 	if ((hdmi_hotplugstate == HDMI_STATE_HOT_PLUGIN_AND_POWER_ON)
@@ -1826,6 +1896,14 @@ void hdmi_timer_impl(void)
 			hdmi2_tmdsonoff(0);
 
 		hdmi_internal_video_config(resolution_v, 0, 0);
+	}
+
+	if ((hdmi_dpi_keepalive == 1)
+	    && (hdmi_hotplugstate == HDMI_STATE_HOT_PLUGIN_AND_POWER_ON)) {
+		if (++dpika_tick >= DPIKA_TICKS) {
+			dpika_tick = 0;
+			hdmi_dpi_output_repair();
+		}
 	}
 
 	hdmistate_debug++;

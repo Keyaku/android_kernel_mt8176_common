@@ -136,6 +136,26 @@ static void process_dbg_opt(const char *opt)
 		hdmi_frc_log_level = enable;
 	}
 #if defined(CONFIG_MTK_INTERNAL_HDMI_SUPPORT)
+	else if (0 == strncmp(opt, "dpirepair", 9)) {
+		hdmi_dpi_output_repair();
+	} else if (0 == strncmp(opt, "dpikeepalive:", 13)) {
+		if (0 == strncmp(opt + 13, "on", 2))
+			hdmi_dpi_keepalive_set(1);
+		else if (0 == strncmp(opt + 13, "off", 3))
+			hdmi_dpi_keepalive_set(0);
+		else
+			goto Error;
+	} else if (0 == strncmp(opt, "dpioutput:", 10)) {
+		char *p = (char *)opt + 10;
+		unsigned int enable = 0;
+
+		ret = kstrtouint(p, 0, &enable);
+		if (ret) {
+			DDPERR("DISP/%s: line:%d errno %d\n", __func__, __LINE__, ret);
+			goto Error;
+		}
+		hdmi_dpi_output_set(enable);
+	}
 	else if ((0 == strncmp(opt, "dbgtype:", 8)) ||
 		 (0 == strncmp(opt, "regw:", 5)) ||
 		 (0 == strncmp(opt, "regr:", 5)) ||
