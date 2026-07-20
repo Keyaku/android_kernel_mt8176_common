@@ -293,7 +293,10 @@ static int _should_start_path(void)
 /***trigger operation:  VDO+CMDQ  CMD+CMDQ VDO+CPU  CMD+CPU
 *** 3.path start:	idle->Y      Y    idle->Y     Y        ***/
 
-#ifdef HDMI_SUB_PATH_PRESENT_FENCE_SUPPORT
+#if defined(HDMI_SUB_PATH_PRESENT_FENCE_SUPPORT) || defined(XDPLUS_EXTD_PRESENT_FENCE)
+	/* With a real present fence the path must be started/triggered every round;
+	 * the idle test below only suits the fence-less flow and leaves RDMA1 at
+	 * ENGINE_EN=0 forever. */
 	return 1;
 #else
 	if (ext_disp_is_video_mode())
@@ -313,7 +316,10 @@ static int _should_trigger_path(void)
 	/* this is not a perfect design, we can't decide path trigger(ovl/rdma/dsi..) separately with mutex enable */
 	/* but it's lucky because path trigger and mutex enable is the same w/o cmdq, and it's correct w/ CMDQ(Y+N). */
 
-#ifdef HDMI_SUB_PATH_PRESENT_FENCE_SUPPORT
+#if defined(HDMI_SUB_PATH_PRESENT_FENCE_SUPPORT) || defined(XDPLUS_EXTD_PRESENT_FENCE)
+	/* With a real present fence the path must be started/triggered every round;
+	 * the idle test below only suits the fence-less flow and leaves RDMA1 at
+	 * ENGINE_EN=0 forever. */
 	return 1;
 #else
 	if (ext_disp_cmdq_enabled()) {
@@ -1318,7 +1324,7 @@ static unsigned int cmdqDdpResetEng(uint64_t engineFlag)
 #endif
 
 
-#ifdef HDMI_SUB_PATH_PRESENT_FENCE_SUPPORT
+#if defined(HDMI_SUB_PATH_PRESENT_FENCE_SUPPORT) || defined(XDPLUS_EXTD_PRESENT_FENCE)
 static struct task_struct *ext_disp_present_fence_release_worker_task;
 wait_queue_head_t ext_disp_irq_wq;
 atomic_t ext_disp_irq_event = ATOMIC_INIT(0);
@@ -1899,7 +1905,7 @@ done:
 #endif
 
 
-#ifdef HDMI_SUB_PATH_PRESENT_FENCE_SUPPORT
+#if defined(HDMI_SUB_PATH_PRESENT_FENCE_SUPPORT) || defined(XDPLUS_EXTD_PRESENT_FENCE)
 	if ((ext_disp_present_fence_release_worker_task == NULL)
 	    && !boot_up_with_facotry_mode()) {
 

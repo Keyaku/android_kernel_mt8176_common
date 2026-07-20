@@ -54,6 +54,13 @@ ccflags-y += -DHDMI_SUB_PATH_PROB
 ccflags-y += -DHDMI_SUB_PATH_PRESENT_FENCE_SUPPORT
 endif
 
+# Present-fence machinery only, without the box-only HDMI_SUB_PATH rework: the
+# full define also flips _should_start_path()/_should_trigger_path() and moves the
+# rdma-config IRQ from RDMA1/RDMA2 to OVL1/WDMA1, which would break the direct-link
+# path this device uses. The external session needs a real present fence or the
+# composer triggers it with fd -1 and the sub_disp path never starts.
+ccflags-y += -DXDPLUS_EXTD_PRESENT_FENCE
+
 obj-y	:= extd_ddp.o extd_debug.o  extd_drv.o extd_utils.o extd_lcm.o extd_fence.o
 
 else
