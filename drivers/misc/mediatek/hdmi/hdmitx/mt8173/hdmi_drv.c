@@ -1814,6 +1814,8 @@ void hdmi_dpi_output_repair(void)
 
 	/* clock gate first: a gated DPI bank swallows every write */
 	hdmi_read(DPIKA_MMSYS_CG_CON1, &val);
+	if (val == 0xffffffff)	/* bank not powered/mapped yet - nothing to repair */
+		return;
 	if (val & DPIKA_MMSYS_DPI_PIXEL) {
 		hdmi_write(DPIKA_MMSYS_CG_CLR1, DPIKA_MMSYS_DPI_PIXEL);
 		pr_err("[hdmi]dpi keepalive: ungate mm_dpi_pixel (CG_CON1 0x%08x)\n", val);
@@ -1898,8 +1900,13 @@ void hdmi_timer_impl(void)
 		hdmi_internal_video_config(resolution_v, 0, 0);
 	}
 
+	/* The hotplug state machine never reaches HOT_PLUGIN_AND_POWER_ON when the
+	 * plug is faked (fakecablein), so gate on the TX being powered instead and
+	 * accept either.
+	 */
 	if ((hdmi_dpi_keepalive == 1)
-	    && (hdmi_hotplugstate == HDMI_STATE_HOT_PLUGIN_AND_POWER_ON)) {
+	    && ((hdmi_hotplugstate == HDMI_STATE_HOT_PLUGIN_AND_POWER_ON)
+		|| (hdmi_powerenable == 1))) {
 		if (++dpika_tick >= DPIKA_TICKS) {
 			dpika_tick = 0;
 			hdmi_dpi_output_repair();
