@@ -1716,6 +1716,10 @@ static VOID wlanNetDestroy(struct wireless_dev *prWdev)
 
 }				/* end of wlanNetDestroy() */
 
+/* AIS PS profile in force before the last SETSUSPENDMODE 1, so the resume
+ * path can restore it. Param_PowerModeMax = sentinel for "nothing saved". */
+static UINT_8 g_ucPreSuspendPsProfile = Param_PowerModeMax;
+
 VOID wlanSetSuspendMode(P_GLUE_INFO_T prGlueInfo, BOOLEAN fgEnable)
 {
 	struct net_device *prDev = NULL;
@@ -1731,6 +1735,63 @@ VOID wlanSetSuspendMode(P_GLUE_INFO_T prGlueInfo, BOOLEAN fgEnable)
 					FALSE, FALSE, TRUE, &u4SetInfoLen);
 	}
 #endif
+
+	/* Screen off: let the radio doze even when the framework pins
+	 * power-save off (persist.sys.wifi_ps_pin_off, the low-ack-kick
+	 * workaround). CAM while associated keeps the connsys firmware awake
+	 * at a constant wake rate and dominates standby drain; the low-ack
+	 * kick needs sustained interactive transfer, which cannot happen with
+	 * the screen off. The pre-suspend profile is restored on resume. */
+	if (prGlueInfo->prAdapter && prGlueInfo->prAdapter->prAisBssInfo) {
+		PARAM_POWER_MODE_T rPowerMode;
+		UINT_32 u4PsLen = 0;
+		UINT_8 ucBssIdx = prGlueInfo->prAdapter->prAisBssInfo->ucBssIndex;
+
+		rPowerMode.ucBssIdx = ucBssIdx;
+
+		if (fgEnable) {
+			g_ucPreSuspendPsProfile = prGlueInfo->prAdapter->
+			    rWlanInfo.arPowerSaveMode[ucBssIdx].ucPsProfile;
+			if (g_ucPreSuspendPsProfile == Param_PowerModeCAM) {
+				rPowerMode.ePowerMode = Param_PowerModeFast_PSP;
+				if (kalIoctl(prGlueInfo,
+					     wlanoidSet802dot11PowerSaveProfile,
+					     &rPowerMode, sizeof(PARAM_POWER_MODE_T),
+					     FALSE, FALSE, TRUE,
+					     &u4PsLen) != WLAN_STATUS_SUCCESS)
+					DBGLOG(INIT, ERROR,
+					       "suspend: force PS profile failed\n");
+			}
+		} else if (g_ucPreSuspendPsProfile == Param_PowerModeCAM) {
+			g_ucPreSuspendPsProfile = Param_PowerModeMax;
+			rPowerMode.ePowerMode = Param_PowerModeCAM;
+			if (kalIoctl(prGlueInfo,
+				     wlanoidSet802dot11PowerSaveProfile,
+				     &rPowerMode, sizeof(PARAM_POWER_MODE_T),
+				     FALSE, FALSE, TRUE,
+				     &u4PsLen) != WLAN_STATUS_SUCCESS)
+				DBGLOG(INIT, ERROR,
+				       "resume: restore PS profile failed\n");
+		}
+	}
+
+	/* Re-program the RX filter so wlanoidSetPacketFilter's suspend-time
+	 * multicast drop engages at suspend enter (and disengages at resume)
+	 * instead of waiting for the next incidental filter update. */
+	if (prGlueInfo->prAdapter) {
+		UINT_32 u4PacketFilter = prGlueInfo->prAdapter->u4OsPacketFilter;
+		UINT_32 u4SetInfoLen = 0;
+
+		if (kalIoctl(prGlueInfo,
+			     wlanoidSetCurrentPacketFilter,
+			     &u4PacketFilter,
+			     sizeof(u4PacketFilter),
+			     FALSE, FALSE, TRUE,
+			     &u4SetInfoLen) != WLAN_STATUS_SUCCESS)
+			DBGLOG(INIT, ERROR,
+			       "suspend: RX filter refresh failed\n");
+	}
+
 	prDev = prGlueInfo->prDevHandler;
 	if (!prDev)
 		return;
