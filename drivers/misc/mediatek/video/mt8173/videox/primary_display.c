@@ -1104,8 +1104,19 @@ static int init_decouple_buffers(void)
 	decouple_rdma_config.height = height;
 	decouple_rdma_config.width = width;
 	decouple_rdma_config.idx = 0;
+#ifdef XDPLUS_DISP_MODE_CAP_SWITCHABLE
+	/*
+	 * The buffers above are sized from primary_display_get_bpp() = 32, so
+	 * describing them as 24-bit RGB888 with a 3-byte pitch makes RDMA0 read
+	 * the WDMA0 output at the wrong stride: the panel shows the frame split
+	 * in two and colour-shifted. Match the format to the allocation.
+	 */
+	decouple_rdma_config.inputFormat = eRGBA8888;
+	decouple_rdma_config.pitch = width * DP_COLOR_BITS_PER_PIXEL(eRGBA8888) / 8;
+#else
 	decouple_rdma_config.inputFormat = eRGB888;
 	decouple_rdma_config.pitch = width * DP_COLOR_BITS_PER_PIXEL(eRGB888) / 8;
+#endif
 	decouple_rdma_config.security = DISP_NORMAL_BUFFER;
 
 	/*initialize wdma config */
@@ -1115,10 +1126,18 @@ static int init_decouple_buffers(void)
 	decouple_wdma_config.clipY = 0;
 	decouple_wdma_config.clipHeight = height;
 	decouple_wdma_config.clipWidth = width;
+#ifdef XDPLUS_DISP_MODE_CAP_SWITCHABLE
+	decouple_wdma_config.outputFormat = eRGBA8888;
+#else
 	decouple_wdma_config.outputFormat = eRGB888;
+#endif
 	decouple_wdma_config.useSpecifiedAlpha = 1;
 	decouple_wdma_config.alpha = 0xFF;
+#ifdef XDPLUS_DISP_MODE_CAP_SWITCHABLE
+	decouple_wdma_config.dstPitch = width * DP_COLOR_BITS_PER_PIXEL(eRGBA8888) / 8;
+#else
 	decouple_wdma_config.dstPitch = width * DP_COLOR_BITS_PER_PIXEL(eRGB888) / 8;
+#endif
 	decouple_wdma_config.security = DISP_NORMAL_BUFFER;
 
 #ifdef CONFIG_MTK_SEC_VIDEO_PATH_SUPPORT
