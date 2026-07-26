@@ -503,6 +503,35 @@ int _ioctl_trigger_session(unsigned long arg)
 
 	session_id = config.session_id;
 
+#ifdef XDPLUS_TRIGGER_PROBE
+	/* Temporary instrumentation (§98 fix-2 hunt): is userspace triggering the
+	 * external session at all? Rate-limited so a 60 Hz primary stream cannot
+	 * flood the ring buffer.
+	 */
+	{
+		static unsigned long xdplus_last_pr;
+		static unsigned int xdplus_prim_cnt, xdplus_ext_cnt, xdplus_other_cnt;
+
+		if (DISP_SESSION_TYPE(session_id) == DISP_SESSION_PRIMARY)
+			xdplus_prim_cnt++;
+		else if (DISP_SESSION_TYPE(session_id) == DISP_SESSION_EXTERNAL)
+			xdplus_ext_cnt++;
+		else
+			xdplus_other_cnt++;
+
+		if (time_after(jiffies, xdplus_last_pr + HZ)) {
+			xdplus_last_pr = jiffies;
+			pr_info("[XDPLUS-TRIG] sess=0x%08x type=%d pf_idx=%d | 1s counts: prim=%u ext=%u other=%u\n",
+				session_id, DISP_SESSION_TYPE(session_id),
+				config.present_fence_idx, xdplus_prim_cnt,
+				xdplus_ext_cnt, xdplus_other_cnt);
+			xdplus_prim_cnt = 0;
+			xdplus_ext_cnt = 0;
+			xdplus_other_cnt = 0;
+		}
+	}
+#endif
+
 	ticket = primary_display_get_ticket();
 
 	session_info = disp_get_session_sync_info_for_debug(session_id);

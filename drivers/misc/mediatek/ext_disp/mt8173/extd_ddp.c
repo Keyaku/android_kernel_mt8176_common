@@ -2436,6 +2436,26 @@ int ext_disp_trigger(int blocking, void *callback, unsigned int userdata)
 	int ret = 0;
 	/* DISPFUNC(); */
 
+#ifdef XDPLUS_TRIGGER_PROBE
+	/* Temporary instrumentation (§98 fix-2 hunt): if the ioctl does reach here,
+	 * which of the three guards below rejects the trigger? Rate-limited to 1/s.
+	 */
+	{
+		static unsigned long xdplus_last_pr;
+		static unsigned int xdplus_calls;
+
+		xdplus_calls++;
+		if (time_after(jiffies, xdplus_last_pr + HZ)) {
+			xdplus_last_pr = jiffies;
+			pr_info("[XDPLUS-EXTTRIG] calls/s=%u hdmi_active=%d state=%d need_trigger_overlay=%d handle=%p start=%d trig=%d\n",
+				xdplus_calls, is_hdmi_active(), pgc->state,
+				pgc->need_trigger_overlay, pgc->dpmgr_handle,
+				_should_start_path(), _should_trigger_path());
+			xdplus_calls = 0;
+		}
+	}
+#endif
+
 	_ext_disp_path_lock();
 #ifdef HDMI_SUB_PATH
 	/*

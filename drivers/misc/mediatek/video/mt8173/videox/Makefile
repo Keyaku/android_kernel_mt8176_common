@@ -32,6 +32,10 @@ obj-$(CONFIG_MTK_FB) += mtkfb_console.o             \
 			compat_mtk_disp_mgr.o
 
 subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/mmp/
+
+# Temporary §98 fix-2 instrumentation: log which display sessions userspace
+# triggers (rate-limited to 1/s). Remove once the external path streams.
+ccflags-y += -DXDPLUS_TRIGGER_PROBE
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/video/$(MTK_PLATFORM)/dispsys   \
              -I$(srctree)/drivers/misc/mediatek/sync/      \
              -I$(srctree)/drivers/misc/mediatek/m4u/       \
