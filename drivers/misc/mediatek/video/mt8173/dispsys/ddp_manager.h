@@ -58,6 +58,12 @@ typedef enum {
 
 	DDP_IRQ_WDMA1_FRAME_COMPLETE = MAKE_DDP_IRQ_BIT(DISP_MODULE_WDMA1, 0),
 
+	/* DPI0 INTSTA bit 0 = VSYNC, bit 1 = VDE, bit 2 = underflow.
+	 * ddp_get_module_max_irq_bit(DISP_MODULE_DPI0) is 2, so all three
+	 * dispatch through disp_invoke_irq_callbacks() already.
+	 */
+	DDP_IRQ_DPI0_VSYNC = MAKE_DDP_IRQ_BIT(DISP_MODULE_DPI0, 0),
+
 	DDP_IRQ_DSI0_EXT_TE = MAKE_DDP_IRQ_BIT(DISP_MODULE_DSI0, 4),
 	DDP_IRQ_DSI0_CMD_DONE = MAKE_DDP_IRQ_BIT(DISP_MODULE_DSI0, 2),
 

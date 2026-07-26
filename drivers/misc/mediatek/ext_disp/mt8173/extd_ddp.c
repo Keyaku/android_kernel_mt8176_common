@@ -1881,9 +1881,28 @@ int ext_disp_init(struct platform_device *dev, char *lcm_name, unsigned int sess
 		if (ext_disp_mode == EXTD_DEBUG_RDMA_DPI_MODE)
 			dpmgr_map_event_to_irq(pgc->dpmgr_handle, DISP_PATH_EVENT_IF_VSYNC,
 					       DDP_IRQ_RDMA2_DONE);
+#ifdef XDPLUS_EXTD_VSYNC_FROM_DPI
+		/* Stock sources the external vsync from DDP_IRQ_RDMA1_DONE, but RDMA1
+		 * only raises DONE while it is actually streaming. On this direct-couple
+		 * (mode=dpi) path RDMA1 goes idle after the first frames — measured live:
+		 * OVL1/RDMA1 interrupt counts freeze at 0/s while DPI keeps scanning out
+		 * at 60 Hz — so the vsync event never signals, every
+		 * dpmgr_wait_event_timeout(DISP_PATH_EVENT_IF_VSYNC) falls through on its
+		 * timeout, and HWC logs "wait VSYNC timeout on scenario sub_disp" ~10/s
+		 * while presenting at the timeout rate instead of 60 Hz.
+		 *
+		 * DPI0's own VSYNC interrupt is the honest timebase here: it is the
+		 * engine driving the HDMI scanout and it ticks at a steady 60 Hz
+		 * independently of whether RDMA1 has work. Source the event from it.
+		 */
+		else
+			dpmgr_map_event_to_irq(pgc->dpmgr_handle, DISP_PATH_EVENT_IF_VSYNC,
+					       DDP_IRQ_DPI0_VSYNC);
+#else
 		else
 			dpmgr_map_event_to_irq(pgc->dpmgr_handle, DISP_PATH_EVENT_IF_VSYNC,
 					       DDP_IRQ_RDMA1_DONE);
+#endif
 	}
 
 	if (ext_disp_use_cmdq == CMDQ_ENABLE && (!_is_hdmi_decouple_mode(pgc->mode))) {

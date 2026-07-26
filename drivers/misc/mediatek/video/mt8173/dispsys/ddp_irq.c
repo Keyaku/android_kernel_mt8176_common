@@ -249,12 +249,19 @@ irqreturn_t disp_irq_handler(int irq, void *dev_id)
 		    (irq == ddp_irq_map[DISP_MODULE_DPI0]) ? DISP_MODULE_DPI0 : DISP_MODULE_DPI1;
 		reg_val =
 		    (DISP_REG_GET(DISPSYS_DPI0_BASE + 0xC + index * DISP_INDEX_OFFSET) & 0xff);
+		/* The three status checks below used to be if()s whose bodies were
+		 * commented-out printk()s, so they nested and the ack write only ran
+		 * when VSYNC, VDE and underflow were asserted together — i.e. a plain
+		 * VSYNC interrupt was never acked. Braces make the checks real logging
+		 * and the ack unconditional; the external display's vsync event now
+		 * rides on DPI0 bit 0 (DDP_IRQ_DPI0_VSYNC), so this must be correct.
+		 */
 		if (reg_val & (1 << 0))
-			/*printk("IRQ: DPI%d VSYNC!\n", index); */
+			DDPIRQ("IRQ: DPI%d VSYNC!\n", index);
 		if (reg_val & (1 << 1))
-			/*printk("IRQ: DPI%d VDE!\n", index); */
+			DDPIRQ("IRQ: DPI%d VDE!\n", index);
 		if (reg_val & (1 << 2))
-			/*printk("IRQ: DPI%d underflow!\n", index); */
+			DDPIRQ("IRQ: DPI%d underflow!\n", index);
 		DISP_CPU_REG_SET(DISPSYS_DPI0_BASE + 0xC + index * DISP_INDEX_OFFSET, ~reg_val);
 	} else if (irq == ddp_irq_map[DISP_MODULE_OVL0] || irq == ddp_irq_map[DISP_MODULE_OVL1]) {
 		index = (irq == ddp_irq_map[DISP_MODULE_OVL0]) ? 0 : 1;

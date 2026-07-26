@@ -61,6 +61,14 @@ endif
 # composer triggers it with fd -1 and the sub_disp path never starts.
 ccflags-y += -DXDPLUS_EXTD_PRESENT_FENCE
 
+# Source the external DISP_PATH_EVENT_IF_VSYNC from DPI0's own VSYNC interrupt
+# instead of DDP_IRQ_RDMA1_DONE. RDMA1 only raises DONE while it is streaming and
+# goes idle on this direct-couple path, so the stock mapping leaves the composer
+# waiting out dpmgr_wait_event_timeout() on every frame ("wait VSYNC timeout on
+# scenario sub_disp") and presenting at the timeout rate instead of 60 Hz. DPI0
+# is the engine actually driving the HDMI scanout and ticks regardless.
+ccflags-y += -DXDPLUS_EXTD_VSYNC_FROM_DPI
+
 obj-y	:= extd_ddp.o extd_debug.o  extd_drv.o extd_utils.o extd_lcm.o extd_fence.o
 
 else
