@@ -69,6 +69,10 @@ ccflags-y += -DXDPLUS_EXTD_PRESENT_FENCE
 # is the engine actually driving the HDMI scanout and ticks regardless.
 ccflags-y += -DXDPLUS_EXTD_VSYNC_FROM_DPI
 
+# Temporary §98 fix-2 instrumentation: log ext_disp_trigger() entry state
+# (rate-limited to 1/s). Remove once the external path streams.
+ccflags-y += -DXDPLUS_TRIGGER_PROBE
+
 obj-y	:= extd_ddp.o extd_debug.o  extd_drv.o extd_utils.o extd_lcm.o extd_fence.o
 
 else
