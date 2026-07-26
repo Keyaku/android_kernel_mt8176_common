@@ -66,6 +66,19 @@
 #define DISP_SESSION_OUTPUT_INTERFACE_TIMELINE_ID (PRIMARY_DISPLAY_SESSION_LAYER_COUNT+2)
 #define DISP_SESSION_TIMELINE_COUNT			(DISP_SESSION_OUTPUT_INTERFACE_TIMELINE_ID+1)	/* 6 for ROME */
 #define MAX_SESSION_COUNT					5
+
+#ifdef XDPLUS_DISP_MODE_CAP_SWITCHABLE
+/*
+ * HW_MODE_CAP: Direct-Link, Decouple or Switchable.
+ * Stock mt8173 leaves this undefined, so _ioctl_get_display_caps() reports
+ * DISP_OUTPUT_CAP_DIRECT_LINK and the vendor hwcomposer disables its mirror
+ * path outright (checkMirrorPath bails on caps_info.output_mode == 0). The
+ * decouple and decouple-mirror session modes are fully implemented here
+ * (primary_display_switch_mode), so advertise them like mt8167 does.
+ */
+#define DISP_HW_MODE_CAP DISP_OUTPUT_CAP_SWITCHABLE
+#define DISP_HW_PASS_MODE DISP_OUTPUT_CAP_SINGLE_PASS
+#endif
 /* #define DISP_SWITCH_DST_MODE */
 #define HDMI_MAIN_PATH (0)
 #define MAIN_PATH_DISABLE_LCM (0)

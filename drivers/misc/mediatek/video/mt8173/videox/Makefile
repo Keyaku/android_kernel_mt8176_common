@@ -39,6 +39,10 @@ ccflags-y += -DXDPLUS_TRIGGER_PROBE
 # §100: bound the primary IF_VSYNC wait so an RDMA0_DONE stall cannot latch the
 # whole display pipeline into a permanent freeze. Revertible: drop this flag.
 ccflags-y += -DXDPLUS_PRIM_VSYNC_TIMEOUT
+# §116: advertise DISP_OUTPUT_CAP_SWITCHABLE in DISP_IOCTL_GET_DISPLAY_CAPS so
+# the vendor hwcomposer stops refusing its mirror path. Revertible: drop this
+# flag and the caps report falls back to DIRECT_LINK.
+ccflags-y += -DXDPLUS_DISP_MODE_CAP_SWITCHABLE
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/video/$(MTK_PLATFORM)/dispsys   \
              -I$(srctree)/drivers/misc/mediatek/sync/      \
              -I$(srctree)/drivers/misc/mediatek/m4u/       \
