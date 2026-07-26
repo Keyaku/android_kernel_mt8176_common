@@ -4177,6 +4177,32 @@ int primary_display_config_input_multiple(primary_disp_input_config *input,
 		cmdq_handle = pgc->cmdq_handle_config;
 	}
 
+#ifdef XDPLUS_TRIGGER_PROBE
+	/* §108: which primary config branch runs while the mirror is up, and how
+	 * many layers survive as enabled? The panel freezes with OVL0 SRC_CON=0x1
+	 * and a pinned L0 address even though set_input_buffer keeps arriving.
+	 */
+	{
+		static unsigned long xdplus_cfg_last;
+
+		if (time_after(jiffies, xdplus_cfg_last + HZ)) {
+			int l, en = 0, dirty = 0;
+
+			for (l = 0; l < PRIMARY_DISPLAY_SESSION_LAYER_COUNT; l++) {
+				if (input[l].layer_en)
+					en++;
+				if (input[l].dirty)
+					dirty++;
+			}
+			xdplus_cfg_last = jiffies;
+			pr_info("[XDPLUS-PCFG] state=%d mode=%d sess_mode=%d ovl_branch=%d nlayer=%u en=%d dirty=%d\n",
+				pgc->state, pgc->mode, pgc->session_mode,
+				_should_config_ovl_input(),
+				session_input->config_layer_num, en, dirty);
+		}
+	}
+#endif
+
 	if (_should_config_ovl_input())
 		_config_ovl_input(input, session_input, disp_handle, cmdq_handle);
 	else
