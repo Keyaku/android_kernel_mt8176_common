@@ -964,8 +964,13 @@ static disp_internal_buffer_info *allocat_decouple_buffer(int size)
 	disp_internal_buffer_info *buf_info = NULL;
 #if defined(MTK_FB_ION_SUPPORT)
 	void *buffer_va = NULL;
-	unsigned long buffer_mva = 0;
-	unsigned int mva_size = 0;
+	ion_phys_addr_t buffer_mva = 0;
+	/*
+	 * ion_phys() writes *len as a size_t. Declaring this as unsigned int
+	 * makes the callee write 8 bytes into a 4-byte slot on arm64.
+	 */
+	size_t mva_size = 0;
+	int ret_phys = 0;
 	struct ion_mm_data mm_data;
 	struct ion_client *client = NULL;
 	struct ion_handle *handle = NULL;
@@ -1001,9 +1006,10 @@ static disp_internal_buffer_info *allocat_decouple_buffer(int size)
 			return NULL;
 		}
 
-		ion_phys(client, handle, (ion_phys_addr_t *) &buffer_mva, (size_t *) &mva_size);
+		ret_phys = ion_phys(client, handle, &buffer_mva, &mva_size);
 		if (buffer_mva == 0) {
-			DISPERR("Fatal Error, get mva failed\n");
+			DISPERR("Fatal Error, get mva failed (ion_phys=%d size=%zu)\n",
+				ret_phys, mva_size);
 			ion_free(client, handle);
 			ion_client_destroy(client);
 			kfree(buf_info);
@@ -4729,6 +4735,21 @@ int primary_display_switch_mode(int sess_mode, unsigned int session, int force)
 		session_mode_spy(sess_mode));
 
 	_primary_path_lock(__func__);
+
+#if defined(XDPLUS_DISP_MODE_CAP_SWITCHABLE) && !defined(MTK_ALPS_BOX_SUPPORT)
+	/*
+	 * init_decouple_buffers() runs inside primary_display_init(), ~1.1 s into
+	 * boot, and ion_phys() has no MVA to hand out that early: all
+	 * DISP_INTERNAL_BUFFER_COUNT allocations fail with "get mva failed" and
+	 * pgc->dc_buf[] stays 0. Any later switch into a decouple mode then
+	 * programs WDMA with addr=0 ("wdma parameter invalidate"). Retry the
+	 * allocation here, where M4U and ION are fully up.
+	 */
+	if (_is_decouple_mode(sess_mode) && pgc->dc_buf[0] == 0) {
+		DISPMSG("decouple buffers missing, retrying allocation\n");
+		init_decouple_buffers();
+	}
+#endif
 
 	MMProfileLogEx(ddp_mmp_get_events()->primary_switch_mode, MMProfileFlagStart,
 		       pgc->session_mode, sess_mode);
