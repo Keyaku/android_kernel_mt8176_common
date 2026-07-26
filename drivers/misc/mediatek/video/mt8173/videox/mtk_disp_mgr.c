@@ -594,6 +594,14 @@ int _ioctl_trigger_session(unsigned long arg)
 
 		ret = ext_disp_trigger(0, NULL, session_id);
 
+#ifdef XDPLUS_TRIGGER_PROBE
+		/* §99: this ret is what the blob reports as
+		 * "DISP_IOCTL_TRIGGER_SESSION ... id:20001 err:-1".
+		 */
+		pr_info("[XDPLUS-TRIG] ext ioctl sess=0x%08x pf_idx=%d -> ret=%d\n",
+			session_id, config.present_fence_idx, ret);
+#endif
+
 		mutex_unlock(&disp_session_lock);
 #endif
 	} else if (DISP_SESSION_TYPE(session_id) == DISP_SESSION_MEMORY) {
