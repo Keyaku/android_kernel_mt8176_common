@@ -73,6 +73,12 @@ ccflags-y += -DXDPLUS_EXTD_VSYNC_FROM_DPI
 # (rate-limited to 1/s). Remove once the external path streams.
 ccflags-y += -DXDPLUS_TRIGGER_PROBE
 
+# §101: signal external present fences that userspace prepared but never
+# triggered. hotplugExt()'s ignoreJob(1) drops an in-flight job whose fence was
+# already handed out, and SurfaceFlinger then blocks on it forever. Revertible:
+# drop this flag.
+ccflags-y += -DXDPLUS_EXTD_FENCE_WATCHDOG
+
 obj-y	:= extd_ddp.o extd_debug.o  extd_drv.o extd_utils.o extd_lcm.o extd_fence.o
 
 else
