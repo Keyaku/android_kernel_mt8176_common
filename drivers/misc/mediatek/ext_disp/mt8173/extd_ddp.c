@@ -1413,6 +1413,52 @@ static int ext_disp_present_fence_release_worker_kthread(void *data)
 					    g_ext_PresentFenceIndex, layer_info->timeline->value);
 			}
 
+#ifdef XDPLUS_EXTD_FENCE_WATCHDOG
+			/* §101: present-fence watchdog for the external session.
+			 *
+			 * The loop above can only signal up to g_ext_PresentFenceIndex, which
+			 * userspace hands over in DISP_IOCTL_TRIGGER_SESSION. If the blob
+			 * prepares a present fence and then never triggers that frame, the
+			 * index never arrives and the fence is never signalled — SurfaceFlinger
+			 * then blocks on it forever and the whole pipeline stops. That happens
+			 * for real: DisplayManager::hotplugExt() calls
+			 * HWCDispatcher::ignoreJob(1, false), dropping display 1's in-flight
+			 * job, and the frame it dropped had already been given a fence (§100).
+			 *
+			 * fence_idx is the last index PREPARED, timeline->value the last one
+			 * SIGNALLED, so a persistent gap means orphaned fences. Normal
+			 * operation runs one or two frames ahead, hence the round threshold
+			 * rather than acting on the first sighting: this worker wakes on ext
+			 * vsync or every HZ/25, so 4 rounds is ~64-160 ms.
+			 *
+			 * Signalling a frame that never scanned out breaks the "was presented"
+			 * promise, which is the same trade the primary vsync bound makes
+			 * (§100) and is strictly better than a permanent stall.
+			 */
+			{
+				static unsigned int xdplus_stall_rounds;
+				static unsigned long xdplus_last_pr;
+				int lag = (int)layer_info->fence_idx -
+					  (int)layer_info->timeline->value;
+
+				if (lag > 0 && is_hdmi_active()) {
+					xdplus_stall_rounds++;
+					if (xdplus_stall_rounds >= 4) {
+						timeline_inc(layer_info->timeline, lag);
+						if (time_after(jiffies, xdplus_last_pr + HZ)) {
+							xdplus_last_pr = jiffies;
+							pr_info("[XDPLUS-EXTFENCE] orphaned present fences: forced +%d (prepared=%u signalled=%u trig_idx=%u)\n",
+								lag, layer_info->fence_idx,
+								layer_info->timeline->value,
+								g_ext_PresentFenceIndex);
+						}
+						xdplus_stall_rounds = 0;
+					}
+				} else {
+					xdplus_stall_rounds = 0;
+				}
+			}
+#endif
 
 			_ext_disp_path_unlock();
 		}
