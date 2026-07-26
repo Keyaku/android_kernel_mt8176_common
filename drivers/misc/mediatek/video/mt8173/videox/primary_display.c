@@ -3149,13 +3149,60 @@ int primary_display_wait_for_vsync(void *config)
 	_disp_primary_path_dsi_clock_on(0);
 #endif
 
+#ifdef XDPLUS_PRIM_VSYNC_TIMEOUT
+	/* §100: the primary's DISP_PATH_EVENT_IF_VSYNC is mapped to
+	 * DDP_IRQ_RDMA0_DONE (see primary_display_init / switch_dst_mode), which only
+	 * fires while RDMA0 is actually completing frames. The unbounded
+	 * dpmgr_wait_event() below therefore self-latches: any stall that stops RDMA0
+	 * for one frame — an external-display hiccup is enough, and _ioctl_wait_vsync
+	 * routes the starved ext waiter here too — means the event never signals, SF
+	 * blocks in WAIT_FOR_VSYNC forever, never posts again, and so RDMA0 is never
+	 * restarted. Observed as a hard freeze of BOTH displays with the hardware
+	 * still scanning out (VSyncThread_0 parked in dpmgr_wait_event), recoverable
+	 * only by reboot.
+	 *
+	 * There is no free-running panel timebase to re-source from in video mode
+	 * (the enum only exposes RDMA0-derived bits; DSI0 offers EXT_TE/CMD_DONE,
+	 * which are command-mode, and DPI0 belongs to HDMI), so bound the wait
+	 * instead and treat a timeout as a synthesized vsync. SF stays clocked, posts
+	 * again, RDMA0 resumes and the pipeline self-heals. Worst case is a vsync up
+	 * to two frames late, which strictly beats hanging.
+	 */
+	ret = dpmgr_wait_event_timeout(pgc->dpmgr_handle, DISP_PATH_EVENT_IF_VSYNC, HZ / 30);
+	if (ret == 0) {
+		static unsigned long xdplus_last_pr;
+		static unsigned int xdplus_timeouts;
+
+		xdplus_timeouts++;
+		if (time_after(jiffies, xdplus_last_pr + HZ)) {
+			xdplus_last_pr = jiffies;
+			pr_info("[XDPLUS-PVSYNC] IF_VSYNC timeout, synthesizing: %u in the last second\n",
+				xdplus_timeouts);
+			xdplus_timeouts = 0;
+		}
+	}
+	/* Callers (and _ioctl_wait_vsync's ext fallback) treat >= 0 as success and
+	 * dpmgr_wait_event_timeout returns the jiffies left, so normalize.
+	 */
+	if (ret > 0)
+		ret = 0;
+#else
 	ret = dpmgr_wait_event(pgc->dpmgr_handle, DISP_PATH_EVENT_IF_VSYNC);
+#endif
 	if (ret == -2)
 		DISPCHECK("vsync for primary display path not enabled yet\n");
 
 
-	if (pgc->vsync_drop)
+	if (pgc->vsync_drop) {
+#ifdef XDPLUS_PRIM_VSYNC_TIMEOUT
+		ret = dpmgr_wait_event_timeout(pgc->dpmgr_handle, DISP_PATH_EVENT_IF_VSYNC,
+					       HZ / 30);
+		if (ret > 0)
+			ret = 0;
+#else
 		ret = dpmgr_wait_event(pgc->dpmgr_handle, DISP_PATH_EVENT_IF_VSYNC);
+#endif
+	}
 
 	/* DISPMSG("vsync signaled\n"); */
 	c->vsync_ts = ktime_to_ns(ktime_get());
