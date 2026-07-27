@@ -2776,6 +2776,19 @@ static int decouple_fence_release_kthread(void *data)
 				tmpConfig.pitch = rdma_pitch_sec & ~(3 << 30);
 				tmpConfig.security = rdma_pitch_sec >> 30;
 
+#ifdef XDPLUS_DISP_MODE_CAP_SWITCHABLE
+				/*
+				 * In mirror mode the buffer RDMA reads is the blob's,
+				 * not ours: address and pitch already come from the
+				 * cmdq slots config_wdma_output() filled from the
+				 * hwcomposer's disp_mem_output_config, so the format
+				 * must come from the same place. mem_config.fmt is
+				 * already a DpColorFormat (converted in
+				 * _sync_convert_fb_layer_to_disp_output) and is stable
+				 * under the path lock held here.
+				 */
+				tmpConfig.inputFormat = (DpColorFormat)mem_config.fmt;
+#endif
 				_config_rdma_input_data(&tmpConfig, pgc->dpmgr_handle, cmdq_handle);
 
 				layer = disp_sync_get_output_timeline_id();
