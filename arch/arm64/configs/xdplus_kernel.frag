@@ -12,10 +12,22 @@ CONFIG_PROC_PID_CPUSET=y
 # task-profile CPU-affinity fix; EAS boost is deferred to the mainline path.
 # CONFIG_CGROUP_SCHEDTUNE=y  # unavailable, see above
 #
-# Unlock 2 — ALS/auto-brightness (LTR303): already =y in baseline, pinned here
-# so the fragment documents the full intended set.
+# ALS/auto-brightness (LTR303): DISABLED — the chip is not populated on this
+# board. The board dts declares an LTR303 at i2c9/0x29, but a live userspace
+# bus scan (i2cdetect over every sensor bus, /dev/i2c-* exposed by
+# CONFIG_I2C_CHARDEV below) finds nothing answering at 0x29, nor at the 0x49
+# that cust_i2c.dtsi declares under &i2c2; every other declared client on those
+# buses either ACKs or already has a driver bound. The dts node is design
+# intent, not proof of population.
+#
+# Leaving the driver enabled is not free: ltr303_init_client() busy-waits
+# mdelay(PON_DELAY) = 600 ms before its first register read, unconditionally,
+# and that runs inside the alsps_init initcall on every boot — measured at
+# 629 ms of kernel boot, the single largest initcall on this device. The ALSPS
+# core stays enabled (nothing else depends on it, and it costs nothing once no
+# chip driver registers); only the LTR303 chip driver goes.
 CONFIG_CUSTOM_KERNEL_ALSPS=y
-CONFIG_MTK_LTR303=y
+# CONFIG_MTK_LTR303 is not set
 #
 # Boot-critical (Android 11 Treble): the 2019 CleanROM binder is single-device
 # (only /dev/binder) so hwservicemanager/vndservicemanager can't open their
@@ -35,11 +47,14 @@ CONFIG_MTK_GPU_VERSION="rgx clyde 1.9ED"
 # Lesson: verify it survives into the merged .config.
 CONFIG_MTK_SYNC=y
 #
-# Diagnostic (ALS, 2026-07-22) — expose /dev/i2c-* so userspace i2cdetect/i2cget
-# (already shipped in /system/bin) can live-scan the sensor buses. Baseline has no
-# i2c-dev nodes, so the LTR303-@0x29-absent question can't be answered from
-# userspace. With this, scan every sensor bus: if 0x49 (or any unexplained addr)
-# ACKs = neglected ALS at wrong addr/driver; if only known chips answer = LTR303
-# is DNP/absent, close for good. Config-only, non-ABI, low boot risk. Remove once
-# the ALS question is settled if the node exposure is unwanted long-term.
+# Expose /dev/i2c-* so userspace i2cdetect/i2cget (already shipped in
+# /system/bin) can live-scan the sensor buses; the baseline has no i2c-dev nodes
+# at all. Added as an ALS diagnostic and it answered that question (see above),
+# but kept: a live bus map is the fastest way to tell a declared-but-absent chip
+# from a driver that fails to bind, and it costs nothing at runtime.
+#
+# Reading the scan: an address shows UU only when a driver is bound and
+# i2cdetect skips probing it, so a client that is declared in the dts but has no
+# driver bound and reads "--" is a genuine NAK, not a skip. Cross-check against
+# /sys/bus/i2c/devices/*/driver.
 CONFIG_I2C_CHARDEV=y
