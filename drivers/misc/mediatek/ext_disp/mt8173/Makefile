@@ -69,11 +69,11 @@ ccflags-y += -DXDPLUS_EXTD_PRESENT_FENCE
 # is the engine actually driving the HDMI scanout and ticks regardless.
 ccflags-y += -DXDPLUS_EXTD_VSYNC_FROM_DPI
 
-# Temporary §98 fix-2 instrumentation: log ext_disp_trigger() entry state
+# Temporary fix-2 instrumentation: log ext_disp_trigger() entry state
 # (rate-limited to 1/s). Remove once the external path streams.
 ccflags-y += -DXDPLUS_TRIGGER_PROBE
 
-# §101: signal external present fences that userspace prepared but never
+# Signal external present fences that userspace prepared but never
 # triggered. hotplugExt()'s ignoreJob(1) drops an in-flight job whose fence was
 # already handed out, and SurfaceFlinger then blocks on it forever. Revertible:
 # drop this flag.

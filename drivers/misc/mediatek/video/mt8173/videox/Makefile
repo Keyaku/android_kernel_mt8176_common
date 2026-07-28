@@ -33,13 +33,13 @@ obj-$(CONFIG_MTK_FB) += mtkfb_console.o             \
 
 subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/mmp/
 
-# Temporary §98 fix-2 instrumentation: log which display sessions userspace
+# Temporary fix-2 instrumentation: log which display sessions userspace
 # triggers (rate-limited to 1/s). Remove once the external path streams.
 ccflags-y += -DXDPLUS_TRIGGER_PROBE
-# §100: bound the primary IF_VSYNC wait so an RDMA0_DONE stall cannot latch the
+# Bound the primary IF_VSYNC wait so an RDMA0_DONE stall cannot latch the
 # whole display pipeline into a permanent freeze. Revertible: drop this flag.
 ccflags-y += -DXDPLUS_PRIM_VSYNC_TIMEOUT
-# §116: advertise DISP_OUTPUT_CAP_SWITCHABLE in DISP_IOCTL_GET_DISPLAY_CAPS so
+# Advertise DISP_OUTPUT_CAP_SWITCHABLE in DISP_IOCTL_GET_DISPLAY_CAPS so
 # the vendor hwcomposer stops refusing its mirror path. Revertible: drop this
 # flag and the caps report falls back to DIRECT_LINK.
 ccflags-y += -DXDPLUS_DISP_MODE_CAP_SWITCHABLE

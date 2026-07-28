@@ -504,7 +504,7 @@ int _ioctl_trigger_session(unsigned long arg)
 	session_id = config.session_id;
 
 #ifdef XDPLUS_TRIGGER_PROBE
-	/* Temporary instrumentation (§98 fix-2 hunt): is userspace triggering the
+	/* Temporary instrumentation (fix-2 hunt): is userspace triggering the
 	 * external session at all? Rate-limited so a 60 Hz primary stream cannot
 	 * flood the ring buffer.
 	 */
@@ -595,7 +595,7 @@ int _ioctl_trigger_session(unsigned long arg)
 		ret = ext_disp_trigger(0, NULL, session_id);
 
 #ifdef XDPLUS_TRIGGER_PROBE
-		/* §99: this ret is what the blob reports as
+		/* This ret is what the blob reports as
 		 * "DISP_IOCTL_TRIGGER_SESSION ... id:20001 err:-1".
 		 */
 		pr_info("[XDPLUS-TRIG] ext ioctl sess=0x%08x pf_idx=%d -> ret=%d\n",
@@ -1480,7 +1480,7 @@ static int set_primary_buffer(disp_session_input_config session_input)
 				/* disp_input_config *input = &session_input.config[i]; */
 			}
 #ifdef XDPLUS_TRIGGER_PROBE
-			/* §108: the panel freezes while mirroring even though the
+			/* The panel freezes while mirroring even though the
 			 * composer keeps feeding this session fresh buff_idx. If
 			 * disp_sync_query_buf_info() misses here, the layer is
 			 * silently disabled and OVL0 keeps its last address —
@@ -1567,7 +1567,7 @@ static int set_primary_buffer(disp_session_input_config session_input)
 	}
 
 #ifdef XDPLUS_TRIGGER_PROBE
-	/* §108: full per-layer view of what the composer hands the primary
+	/* Full per-layer view of what the composer hands the primary
 	 * session. The panel freezes while the mirror runs with OVL0 pinned to
 	 * one address even though next_buff_idx keeps climbing, so print every
 	 * configured layer — enabled or not — once a second.
@@ -1629,7 +1629,7 @@ int _ioctl_set_input_buffer(unsigned long arg)
 		     DISP_SESSION_DEV(session_id), s_session_input->config_layer_num);
 
 #ifdef XDPLUS_TRIGGER_PROBE
-	/* §108: the panel is frozen while the mirror runs even though the primary
+	/* The panel is frozen while the mirror runs even though the primary
 	 * session is still triggered ~18/s and OVL0 L0_ADDR stays pinned. Question:
 	 * does the composer stop feeding display 0 new buffers, or does it feed
 	 * them and the kernel drops them? Log the per-session layer-0 address and
@@ -1996,8 +1996,7 @@ int _ioctl_set_output_buffer(unsigned long arg)
 
 
 /* Ported from the ALLDOCUBE X BSP (third_party/lineageos_kernel_cube_u1005)
- * — the real 60-byte disp_caps_info the vendor HWC blob expects.
- * See PORTING_LOG §55. */
+ * — the real 60-byte disp_caps_info the vendor HWC blob expects. */
 int _ioctl_get_display_caps(unsigned long arg)
 {
 	int ret = 0;
