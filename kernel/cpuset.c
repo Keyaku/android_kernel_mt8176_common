@@ -2078,6 +2078,27 @@ struct cgroup_subsys cpuset_cgrp_subsys = {
 	.can_attach	= cpuset_can_attach,
 	.cancel_attach	= cpuset_cancel_attach,
 	.attach		= cpuset_attach,
+	/*
+	 * Without this, every cpuset attach performed by a non-root process on a
+	 * task it does not own fails with -EACCES: cgroup_allow_attach() walks the
+	 * destination cgroup's subsystems and returns -EACCES outright for any
+	 * subsystem that does not implement allow_attach. sched (core.c) and memcg
+	 * (memcontrol.c) both carry this hook already -- cpuset was simply missed
+	 * in this tree, and in the ALLDOCUBE tree it derives from.
+	 *
+	 * The visible cost was ~2400 log lines every boot: system_server (uid
+	 * system) moving app-owned threads into /dev/cpuset/<group>/tasks, 803
+	 * failures per boot, each logged three times by libprocessgroup
+	 * ("AddTidToCgroup failed ... Permission denied", "Failed to add task into
+	 * cgroup", "ExecuteForTask failed for aggregate profile"). It predates the
+	 * hps boot-time work and was only found while reading whole boot logs.
+	 *
+	 * subsys_cgroup_allow_attach() only ever *relaxes* this: it returns 0 for
+	 * CAP_SYS_NICE holders and otherwise still requires the caller euid to
+	 * match the target uid or suid. This is the stock AOSP android-3.18
+	 * behaviour, not a local loosening.
+	 */
+	.allow_attach	= subsys_cgroup_allow_attach,
 	.bind		= cpuset_bind,
 	.fork		= cpuset_fork,
 	.legacy_cftypes	= files,
