@@ -3169,7 +3169,7 @@ int primary_display_wait_for_vsync(void *config)
 #endif
 
 #ifdef XDPLUS_PRIM_VSYNC_TIMEOUT
-	/* §100: the primary's DISP_PATH_EVENT_IF_VSYNC is mapped to
+	/* The primary's DISP_PATH_EVENT_IF_VSYNC is mapped to
 	 * DDP_IRQ_RDMA0_DONE (see primary_display_init / switch_dst_mode), which only
 	 * fires while RDMA0 is actually completing frames. The unbounded
 	 * dpmgr_wait_event() below therefore self-latches: any stall that stops RDMA0
@@ -4197,7 +4197,7 @@ int primary_display_config_input_multiple(primary_disp_input_config *input,
 	}
 
 #ifdef XDPLUS_TRIGGER_PROBE
-	/* §108: which primary config branch runs while the mirror is up, and how
+	/* Which primary config branch runs while the mirror is up, and how
 	 * many layers survive as enabled? The panel freezes with OVL0 SRC_CON=0x1
 	 * and a pinned L0 address even though set_input_buffer keeps arriving.
 	 */

@@ -1,4 +1,4 @@
-# xdplus kernel config deltas over mt8176_defconfig (HANDOFF §KERNEL unlocks).
+# xdplus kernel config deltas over mt8176_defconfig.
 # Merged via scripts/kconfig/merge_config.sh (set KFRAG=this file for kbuild.sh).
 #
 # Unlock 1 — input lag: Android task-profile CPU-affinity.
@@ -23,7 +23,7 @@ CONFIG_MTK_LTR303=y
 # drivers/staging/android/binder.c; this selects the three-device default.
 CONFIG_ANDROID_BINDER_DEVICES="binder,hwbinder,vndbinder"
 #
-# Unlock 3 - PowerVR DDK 1.9@4893595 KM (PORTING_LOG §55): gpu_rgx/ imported
+# Unlock 3 - PowerVR DDK 1.9@4893595 KM: gpu_rgx/ imported
 # from the ALLDOCUBE X kernel (third_party/lineageos_kernel_cube_u1005) —
 # matches the vendor UM blobs + rgx.fw.signed exactly. The gpu/Makefile
 # dispatches obj-y += gpu_$(word 1,MTK_GPU_VERSION)/; word 2 (clyde) selects
@@ -32,10 +32,10 @@ CONFIG_ANDROID_BINDER_DEVICES="binder,hwbinder,vndbinder"
 CONFIG_MTK_GPU_VERSION="rgx clyde 1.9ED"
 # DDK 1.9 + display fences use the OLD staging sync framework (baseline
 # already has CONFIG_SYNC/SW_SYNC/SW_SYNC_USER=y). MTK_SYNC pinned here —
-# §54 lesson: verify it survives into the merged .config.
+# Lesson: verify it survives into the merged .config.
 CONFIG_MTK_SYNC=y
 #
-# Diagnostic (§ALS, 2026-07-22) — expose /dev/i2c-* so userspace i2cdetect/i2cget
+# Diagnostic (ALS, 2026-07-22) — expose /dev/i2c-* so userspace i2cdetect/i2cget
 # (already shipped in /system/bin) can live-scan the sensor buses. Baseline has no
 # i2c-dev nodes, so the LTR303-@0x29-absent question can't be answered from
 # userspace. With this, scan every sensor bus: if 0x49 (or any unexplained addr)

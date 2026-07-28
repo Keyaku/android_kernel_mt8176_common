@@ -1414,7 +1414,7 @@ static int ext_disp_present_fence_release_worker_kthread(void *data)
 			}
 
 #ifdef XDPLUS_EXTD_FENCE_WATCHDOG
-			/* §101: present-fence watchdog for the external session.
+			/* Present-fence watchdog for the external session.
 			 *
 			 * The loop above can only signal up to g_ext_PresentFenceIndex, which
 			 * userspace hands over in DISP_IOCTL_TRIGGER_SESSION. If the blob
@@ -1423,7 +1423,7 @@ static int ext_disp_present_fence_release_worker_kthread(void *data)
 			 * then blocks on it forever and the whole pipeline stops. That happens
 			 * for real: DisplayManager::hotplugExt() calls
 			 * HWCDispatcher::ignoreJob(1, false), dropping display 1's in-flight
-			 * job, and the frame it dropped had already been given a fence (§100).
+			 * job, and the frame it dropped had already been given a fence.
 			 *
 			 * fence_idx is the last index PREPARED, timeline->value the last one
 			 * SIGNALLED, so a persistent gap means orphaned fences. Normal
@@ -1433,7 +1433,7 @@ static int ext_disp_present_fence_release_worker_kthread(void *data)
 			 *
 			 * Signalling a frame that never scanned out breaks the "was presented"
 			 * promise, which is the same trade the primary vsync bound makes
-			 * (§100) and is strictly better than a permanent stall.
+			 * and is strictly better than a permanent stall.
 			 */
 			{
 				static unsigned int xdplus_stall_rounds;
@@ -2013,7 +2013,7 @@ int ext_disp_deinit(char *lcm_name)
 	DISPFUNC();
 
 #ifdef XDPLUS_TRIGGER_PROBE
-	/* §99: deinit is what makes the later resume bail with EXTD_DEINIT. */
+	/* Deinit is what makes the later resume bail with EXTD_DEINIT. */
 	pr_info("[XDPLUS-EXTPWR] deinit enter state=%d nto=%d caller=%pS\n",
 		pgc->state, pgc->need_trigger_overlay, __builtin_return_address(0));
 #endif
@@ -2151,7 +2151,7 @@ int ext_disp_suspend(void)
 	DISPFUNC();
 
 #ifdef XDPLUS_TRIGGER_PROBE
-	/* §99: who suspends a freshly brought-up ext path? */
+	/* Who suspends a freshly brought-up ext path? */
 	pr_info("[XDPLUS-EXTPWR] suspend enter state=%d nto=%d caller=%pS\n",
 		pgc->state, pgc->need_trigger_overlay, __builtin_return_address(0));
 #endif
@@ -2202,7 +2202,7 @@ int ext_disp_resume(void)
 	EXT_DISP_STATUS ret = EXT_DISP_STATUS_OK;
 
 #ifdef XDPLUS_TRIGGER_PROBE
-	/* §99: resume refuses from EXTD_DEINIT, leaving the path dead. */
+	/* Resume refuses from EXTD_DEINIT, leaving the path dead. */
 	pr_info("[XDPLUS-EXTPWR] resume enter state=%d nto=%d caller=%pS\n",
 		pgc->state, pgc->need_trigger_overlay, __builtin_return_address(0));
 #endif
@@ -2496,7 +2496,7 @@ done:
 }
 
 #ifdef XDPLUS_TRIGGER_PROBE
-/* Temporary instrumentation (§99 hunt): ext triggers are rare (a handful per
+/* Temporary instrumentation: ext triggers are rare (a handful per
  * bring-up), so log EVERY call unthrottled, with the guard inputs before the
  * call and the return value after it. A rate-limited probe hid the 1:1
  * correlation between a rejected trigger and the blob's err:-1.
