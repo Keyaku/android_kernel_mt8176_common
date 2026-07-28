@@ -2412,6 +2412,34 @@ static int cpufreq_cpu_callback(struct notifier_block *nfb,
 			setup_cpu0_symlink(dev, true); /* remove cpu0 symlink */
 			aee_record_cpufreq_cb_wrap(2);
 			__cpufreq_add_dev(dev, NULL);
+			/*
+			 * __cpufreq_add_dev() has two early returns that report
+			 * success while leaving the CPU with no policy at all:
+			 * a stale per-CPU cpufreq_cpu_data, and a failed
+			 * cpufreq_rwsem trylock. Either one leaves the CPU
+			 * running unscaled for the rest of the boot, with
+			 * /sys/devices/system/cpu/cpuN/cpufreq/ simply absent
+			 * while /sys/devices/system/cpu/online still lists it --
+			 * a state nothing else ever retries out of, because the
+			 * next attempt would only come from another hotplug.
+			 * Observed on the big cluster during boot; a runtime
+			 * offline/online cycle does not reproduce it.
+			 *
+			 * If the CPU came out of add_dev with no policy, try
+			 * once more. By then the transient (a pending removal
+			 * finishing, an unregister completing) has cleared.
+			 */
+			if (!per_cpu(cpufreq_cpu_data, cpu)) {
+				pr_warn("cpufreq: cpu%u online with no policy, retrying add_dev\n",
+					cpu);
+				__cpufreq_add_dev(dev, NULL);
+				if (!per_cpu(cpufreq_cpu_data, cpu))
+					pr_err("cpufreq: cpu%u still has no policy after retry -- it will run unscaled\n",
+					       cpu);
+				else
+					pr_warn("cpufreq: cpu%u policy recovered on retry\n",
+						cpu);
+			}
 			aee_record_cpufreq_cb_wrap(0);
 			break;
 
