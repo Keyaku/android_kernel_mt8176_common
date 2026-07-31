@@ -3865,6 +3865,8 @@ static int binder_thread_read(struct binder_proc *proc,
 	void __user *buffer = (void __user *)(uintptr_t) binder_buffer;
 	void __user *ptr = buffer + *consumed;
 	void __user *end = buffer + size;
+	void __user *xd_last_ptr = NULL;
+	int xd_stall_iters = 0;
 
 	int ret = 0;
 	int wait_for_proc_work;
@@ -3983,6 +3985,21 @@ retry:
 				goto retry;
 			break;
 		}
+
+		/* xdplus: witness for the binder_thread_read spin (list-corruption
+		 * livelock under sustained media/GPU load). If the loop keeps
+		 * re-picking work without advancing the user buffer, log the
+		 * work type once it looks like a real stall and bail out of the
+		 * loop — return partial data and let userspace retry — rather
+		 * than spin with the binder lock held into a device wedge.
+		 */
+		if (ptr == xd_last_ptr && ++xd_stall_iters >= 100) {
+			pr_crit("binder: xdplus spin detected %d:%d w=%p type=%d iters=%d\n",
+				proc->pid, thread->pid, w, w ? (int)w->type : -1,
+				xd_stall_iters);
+			break;
+		}
+		xd_last_ptr = ptr;
 
 		if (end - ptr < sizeof(tr) + 4)
 			break;
