@@ -21,6 +21,7 @@
 #include <linux/sched.h>
 #include <asm/current.h>
 #include <linux/uaccess.h>
+#include <linux/uio.h>
 #include <linux/fcntl.h>
 #include <linux/poll.h>
 #include <linux/time.h>
@@ -249,6 +250,67 @@ OUT:
 	return retval;
 }
 
+/*
+ * Vectored write. The BT HAL sends each HCI packet as a writev() of two
+ * iovecs (H4 packet-type byte + payload). Without a write_iter op the VFS
+ * falls back to one BT_write() call per iovec, so the packet reaches the
+ * firmware as two separate STP frames — and the firmware's HCI transport
+ * cannot reassemble them: it parks after the 1-byte fragment and never
+ * answers another HCI command (hcit_mtk_stp.c assert once the host times
+ * out). Gather the whole packet here and hand it to STP as one frame.
+ */
+ssize_t BT_write_iter(struct kiocb *iocb, struct iov_iter *from)
+{
+	INT32 retval = 0;
+	size_t count = iov_iter_count(from);
+	INT32 written = 0;
+
+	down(&wr_mtx);
+
+	BT_DBG_FUNC("%s: count %zd\n", __func__, count);
+	if (rstflag) {
+		if (rstflag == 1) {	/* Reset start */
+			retval = -88;
+			BT_INFO_FUNC("%s: detect whole chip reset start\n", __func__);
+		} else if (rstflag == 2) {	/* Reset end */
+			retval = -99;
+			BT_INFO_FUNC("%s: detect whole chip reset end\n", __func__);
+		}
+		goto OUT;
+	}
+
+	if (count > 0) {
+		if (count > BT_BUFFER_SIZE) {
+			count = BT_BUFFER_SIZE;
+			BT_ERR_FUNC("%s: count > BT_BUFFER_SIZE\n", __func__);
+		}
+
+		if (copy_from_iter(&o_buf[0], count, from) != count) {
+			retval = -EFAULT;
+			goto OUT;
+		}
+
+		written = mtk_wcn_stp_send_data(&o_buf[0], count, BT_TASK_INDX);
+		if (0 == written) {
+			retval = -ENOSPC;
+			/* No space is available, native program should not call BT_write with no delay */
+			BT_ERR_FUNC
+			    ("Packet length %zd, sent length %d, retval = %d\n",
+			     count, written, retval);
+		} else {
+			retval = written;
+		}
+
+	} else {
+		retval = -EFAULT;
+		BT_ERR_FUNC("Packet length %zd is not allowed, retval = %d\n", count, retval);
+	}
+
+OUT:
+	up(&wr_mtx);
+	return retval;
+}
+
 ssize_t BT_read(struct file *filp, char __user *buf, size_t count, loff_t *f_pos)
 {
 	INT32 retval = 0;
@@ -415,6 +477,7 @@ const struct file_operations BT_fops = {
 	.release = BT_close,
 	.read = BT_read,
 	.write = BT_write,
+	.write_iter = BT_write_iter,
 	/* .ioctl = BT_ioctl, */
 	.unlocked_ioctl = BT_unlocked_ioctl,
 	.compat_ioctl = BT_compat_ioctl,
