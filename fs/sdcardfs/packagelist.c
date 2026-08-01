@@ -297,7 +297,16 @@ static ssize_t package_appid_attr_store(struct config_item *item,
 		return -ERANGE;
 	ret = insert_str_to_int(pkgl_data_all, item->ci_name, (unsigned int)tmp);
 	package_appid->add_pid = tmp;
-	if (ret)
+	/* insert_str_to_int() returns 1 - not an error - when the key already
+	 * holds this value, meaning only that no permission fixup was needed.
+	 * Returning it here claims a 1-byte short write for a whole-value
+	 * write, and the caller then writes the remainder as if it were a new
+	 * value: "10152" is stored, 1 byte is claimed, "0152" arrives next and
+	 * configfs parses it as 152. Every rewrite of an unchanged appid
+	 * therefore replaced it with appid - 10000, breaking the ownership
+	 * sdcardfs derives for Android/data/<pkg>. Only propagate real errors.
+	 */
+	if (ret < 0)
 		return ret;
 
 	return count;
