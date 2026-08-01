@@ -3857,6 +3857,11 @@ static int binder_has_thread_work(struct binder_thread *thread)
 		(thread->looper & BINDER_LOOPER_STATE_NEED_RETURN);
 }
 
+/* xdplus: budget for the illegal-work-entry dump below. Written only under
+ * the binder global lock, so a plain int is sufficient.
+ */
+static int xd_dumps_left = 8;
+
 static int binder_thread_read(struct binder_proc *proc,
 			      struct binder_thread *thread,
 			      binder_uintptr_t binder_buffer, size_t size,
@@ -3997,6 +4002,25 @@ retry:
 			pr_crit("binder: xdplus spin detected %d:%d w=%p type=%d iters=%d\n",
 				proc->pid, thread->pid, w, w ? (int)w->type : -1,
 				xd_stall_iters);
+			/* Dump the entry itself, which is what names the producer:
+			 * zeroed link fields say slab reuse, plausible ones say a
+			 * wild write. Strictly bounded — the witness fires once per
+			 * ioctl retry, so an unbounded dump would double a printk
+			 * flood that already drops ~450 messages per surviving line,
+			 * and it runs under the binder global lock. Eight samples is
+			 * enough to tell a consistent pattern from a random one.
+			 */
+			if (w && xd_dumps_left > 0) {
+				xd_dumps_left--;
+				pr_crit("binder: xdplus illegal-w dump %p: next=%p prev=%p proc_todo=%p thread_todo=%p\n",
+					w, w->entry.next, w->entry.prev,
+					&proc->todo, &thread->todo);
+				pr_crit("binder: xdplus illegal-w words %08x %08x %08x %08x %08x %08x %08x %08x\n",
+					((u32 *)w)[0], ((u32 *)w)[1],
+					((u32 *)w)[2], ((u32 *)w)[3],
+					((u32 *)w)[4], ((u32 *)w)[5],
+					((u32 *)w)[6], ((u32 *)w)[7]);
+			}
 			break;
 		}
 		xd_last_ptr = ptr;
