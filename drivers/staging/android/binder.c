@@ -2672,6 +2672,29 @@ static int binder_fixup_parent(struct binder_proc *proc,
 	return 0;
 }
 
+/* xdplus: producer-side check for the work entry whose ->type is found zeroed
+ * by the witness in binder_thread_read. Called with the binder global lock
+ * held, from the points where a transaction is enqueued and where an async
+ * transaction is later moved onto a real todo list, so an illegal type can be
+ * attributed to a window rather than guessed at. Bounded, because the paths it
+ * sits on are hot and a flood under this lock is what destroyed the first
+ * capture.
+ */
+static int xd_producer_reports;
+
+static void xd_check_w(const char *where, struct binder_work *w, int debug_id,
+		       int is_async)
+{
+	if (likely(w->type >= BINDER_WORK_TRANSACTION &&
+		   w->type <= BINDER_WORK_CLEAR_DEATH_NOTIFICATION))
+		return;
+	if (xd_producer_reports >= 16)
+		return;
+	xd_producer_reports++;
+	pr_crit("binder: xdplus ILLEGAL TYPE AT %s: w=%p type=%d debug_id=%d async=%d (report #%d)\n",
+		where, w, (int)w->type, debug_id, is_async, xd_producer_reports);
+}
+
 static void binder_transaction(struct binder_proc *proc,
 			       struct binder_thread *thread,
 			       struct binder_transaction_data *tr, int reply,
@@ -3311,6 +3334,13 @@ static void binder_transaction(struct binder_proc *proc,
 	}
 	t->work.type = BINDER_WORK_TRANSACTION;
 	list_add_tail(&t->work.entry, target_list);
+	/* xdplus: the consumer-side witness catches this transaction later with
+	 * work.type == 0 and every other field intact. Read the type back here,
+	 * after the entry is on the list, to split "never took the assignment"
+	 * from "zeroed afterwards while queued".
+	 */
+	xd_check_w("post-enqueue", &t->work, t->debug_id,
+		   target_node && target_list == &target_node->async_todo);
 	tcomplete->type = BINDER_WORK_TRANSACTION_COMPLETE;
 	list_add_tail(&tcomplete->entry, &thread->todo);
 #ifdef RT_PRIO_INHERIT
@@ -3598,14 +3628,25 @@ static int binder_thread_write(struct binder_proc *proc,
 					buffer->target_node->has_async_transaction = 0;
 					buffer->target_node->async_pid = 0;
 				} else {
+					/* xdplus: check on the way out of async_todo */
+					xd_check_w("async-move",
+						   list_entry(buffer->target_node->async_todo.next,
+							      struct binder_work, entry),
+						   buffer->target_node->debug_id, 1);
 					list_move_tail(buffer->target_node->async_todo.next, &thread->todo);
 					buffer->target_node->async_pid = thread->pid;
 				}
 #else
 				if (list_empty(&buffer->target_node->async_todo))
 					buffer->target_node->has_async_transaction = 0;
-				else
+				else {
+					/* xdplus: check on the way out of async_todo */
+					xd_check_w("async-move",
+						   list_entry(buffer->target_node->async_todo.next,
+							      struct binder_work, entry),
+						   buffer->target_node->debug_id, 1);
 					list_move_tail(buffer->target_node->async_todo.next, &thread->todo);
+				}
 #endif
 			}
 			trace_binder_transaction_buffer_release(buffer);
