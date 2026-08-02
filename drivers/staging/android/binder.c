@@ -4021,14 +4021,33 @@ retry:
 				 * write.
 				 */
 				if (w) {
+					/* Both candidate containers start
+					 * "int debug_id; struct binder_work work;",
+					 * so the container is at w - 8 and its
+					 * debug_id is the first word of that.
+					 * Dumping from there names the object:
+					 * a live debug_id identifies it in the
+					 * transaction log, and the fields past
+					 * ->work separate a binder_transaction
+					 * (from/to pointers, code, flags) from a
+					 * binder_node (rb_node/proc).
+					 */
+					u32 *c = (u32 *)((char *)w - 8);
+
 					pr_crit("binder: xdplus illegal-w dump %p: next=%p prev=%p proc_todo=%p thread_todo=%p\n",
 						w, w->entry.next, w->entry.prev,
 						&proc->todo, &thread->todo);
-					pr_crit("binder: xdplus illegal-w words %08x %08x %08x %08x %08x %08x %08x %08x\n",
-						((u32 *)w)[0], ((u32 *)w)[1],
-						((u32 *)w)[2], ((u32 *)w)[3],
-						((u32 *)w)[4], ((u32 *)w)[5],
-						((u32 *)w)[6], ((u32 *)w)[7]);
+					pr_crit("binder: xdplus illegal-w container %p debug_id=%d\n",
+						c, (int)c[0]);
+					pr_crit("binder: xdplus illegal-w c[0-7]  %08x %08x %08x %08x %08x %08x %08x %08x\n",
+						c[0], c[1], c[2], c[3],
+						c[4], c[5], c[6], c[7]);
+					pr_crit("binder: xdplus illegal-w c[8-15] %08x %08x %08x %08x %08x %08x %08x %08x\n",
+						c[8], c[9], c[10], c[11],
+						c[12], c[13], c[14], c[15]);
+					pr_crit("binder: xdplus illegal-w c[16-23] %08x %08x %08x %08x %08x %08x %08x %08x\n",
+						c[16], c[17], c[18], c[19],
+						c[20], c[21], c[22], c[23]);
 				}
 			}
 			break;
