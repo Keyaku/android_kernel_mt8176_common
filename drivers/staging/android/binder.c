@@ -575,8 +575,21 @@ struct binder_thread {
  */
 #define XD_BINDER_CANARY 0x5844504cu	/* "XDPL" */
 
+/* xdplus: private slab cache for transactions. Created in binder_init(); see the
+ * comment there for what it is testing.
+ */
+static struct kmem_cache *xd_transaction_cache;
+
 struct binder_transaction {
 	int debug_id;
+	/* xdplus: second canary, in the padding debug_id already left before the
+	 * 8-byte-aligned work member. The first canary showed the corrupting
+	 * store starts at offset 24 and is at least 8 bytes wide; this one bounds
+	 * it on the other side. Intact means the write does not extend backwards,
+	 * which together with to_proc surviving at offset 48 pins the store to
+	 * the 8..24 byte range starting at 24.
+	 */
+	u32 xd_canary_pre;
 	struct binder_work work;
 	struct binder_thread *from;
 	struct binder_transaction *from_parent;
@@ -2157,7 +2170,7 @@ static void binder_pop_transaction(struct binder_thread *target_thread,
 #ifdef BINDER_MONITOR
 	binder_cancel_bwdog(t);
 #endif
-	kfree(t);
+	kmem_cache_free(xd_transaction_cache, t);
 	binder_stats_deleted(BINDER_STAT_TRANSACTION);
 }
 
@@ -2908,7 +2921,7 @@ static void binder_transaction(struct binder_proc *proc,
 	e->to_proc = target_proc->pid;
 
 	/* TODO: reuse incoming transaction for reply */
-	t = kzalloc(sizeof(*t), GFP_KERNEL);
+	t = kmem_cache_zalloc(xd_transaction_cache, GFP_KERNEL);
 	if (t == NULL) {
 #ifdef MTK_BINDER_DEBUG
 		binder_user_error("%d:%d transaction allocation failed\n", proc->pid, thread->pid);
@@ -2922,8 +2935,10 @@ static void binder_transaction(struct binder_proc *proc,
 	 * the captured c[] offsets from earlier fires stay comparable.
 	 */
 	BUILD_BUG_ON(sizeof(struct binder_work) != 24);
+	BUILD_BUG_ON(offsetof(struct binder_transaction, work) != 8);
 	BUILD_BUG_ON(offsetof(struct binder_transaction, from) != 32);
 	t->work.xd_canary = XD_BINDER_CANARY;
+	t->xd_canary_pre = XD_BINDER_CANARY;
 #ifdef BINDER_MONITOR
 	memcpy(&t->timestamp, &e->timestamp, sizeof(struct timespec));
 	/* do_gettimeofday(&t->tv); */
@@ -3448,7 +3463,7 @@ err_alloc_tcomplete_failed:
 #ifdef BINDER_MONITOR
 	binder_cancel_bwdog(t);
 #endif
-	kfree(t);
+	kmem_cache_free(xd_transaction_cache, t);
 	binder_stats_deleted(BINDER_STAT_TRANSACTION);
 err_alloc_t_failed:
 err_bad_call_stack:
@@ -4139,13 +4154,15 @@ retry:
 					 * bucket) at a varying slot, so log the
 					 * slot to test that across more samples.
 					 */
-					pr_crit("binder: xdplus illegal-w canary %08x (%s) pgoff=%03lx slot=%lu\n",
-						c[7],
+					pr_crit("binder: xdplus illegal-w canary pre=%08x post=%08x (%s) pgoff=%03lx slot=%lu\n",
+						c[1], c[7],
+						c[1] != XD_BINDER_CANARY ?
+							"BOTH: store extends below offset 24" :
 						c[7] == XD_BINDER_CANARY ?
-							"INTACT: 4-byte store" :
+							"POST INTACT: 4-byte store at 24" :
 							c[7] == 0 ?
-							"ZEROED: >=8-byte store" :
-							"ALTERED",
+							"POST ZEROED: 8..24-byte store at 24" :
+							"POST ALTERED",
 						(unsigned long)c & (PAGE_SIZE - 1),
 						((unsigned long)c &
 						 (PAGE_SIZE - 1)) / 256);
@@ -4443,7 +4460,7 @@ retry:
 				binder_update_transaction_ttid(&binder_transaction_log, t);
 			}
 #endif
-			kfree(t);
+			kmem_cache_free(xd_transaction_cache, t);
 			binder_stats_deleted(BINDER_STAT_TRANSACTION);
 		}
 		break;
@@ -4490,7 +4507,7 @@ static void binder_release_work(struct list_head *list)
 #ifdef BINDER_MONITOR
 					binder_cancel_bwdog(t);
 #endif
-					kfree(t);
+					kmem_cache_free(xd_transaction_cache, t);
 					binder_stats_deleted(BINDER_STAT_TRANSACTION);
 				}
 			}
@@ -6172,9 +6189,40 @@ BINDER_DEBUG_ENTRY(stats);
 BINDER_DEBUG_ENTRY(transactions);
 BINDER_DEBUG_ENTRY(transaction_log);
 
+/* xdplus: private slab cache for struct binder_transaction.
+ *
+ * The corrupting store lands at a fixed offset inside a live, otherwise
+ * perfectly consistent transaction, is 8-byte aligned and looks like a single
+ * NULL pointer write. That is the shape of a write through a stale pointer to
+ * a *different* object that used to live at this address. While transactions
+ * come from the shared kmalloc-256 bucket, that other object can be any
+ * allocation in the kernel of a similar size.
+ *
+ * Giving transactions their own cache removes every foreign allocation from
+ * the pool they are drawn from. If the corruption stops, the writer holds a
+ * stale pointer to something that is not a binder transaction, and this is the
+ * fix as well as the diagnosis. If it continues, the writer is either aiming
+ * at binder's own memory or is not a CPU store at all.
+ *
+ * The empty constructor is deliberate: this kernel predates SLAB_NOMERGE, and
+ * SLUB refuses to merge any cache that has a ctor. Without it the cache would
+ * be folded straight back into kmalloc-256 and the experiment would silently
+ * test nothing.
+ */
+static void xd_transaction_ctor(void *p)
+{
+}
+
 static int __init binder_init(void)
 {
 	int ret;
+
+	xd_transaction_cache = kmem_cache_create("binder_transaction_xd",
+						 sizeof(struct binder_transaction),
+						 0, SLAB_HWCACHE_ALIGN,
+						 xd_transaction_ctor);
+	if (!xd_transaction_cache)
+		return -ENOMEM;
 #ifdef BINDER_MONITOR
 	struct task_struct *th;
 
