@@ -400,6 +400,15 @@ struct binder_work {
 		BINDER_WORK_DEAD_BINDER_AND_CLEAR,
 		BINDER_WORK_CLEAR_DEATH_NOTIFICATION,
 	} type;
+	/* xdplus: canary occupying the trailing padding this struct already had,
+	 * directly after the ->type field that every livelock fire finds zeroed.
+	 * It fills existing pad rather than adding space, so sizeof() and every
+	 * containing struct's layout are unchanged (asserted at the transaction
+	 * allocation site) and the bug sees the same object it always did. Its
+	 * only job is to measure the width of the write: intact means exactly
+	 * the 4 bytes of ->type were cleared, cleared means 8 bytes or wider.
+	 */
+	u32 xd_canary;
 };
 
 struct binder_node {
@@ -560,6 +569,11 @@ struct binder_thread {
 	wait_queue_head_t wait;
 	struct binder_stats stats;
 };
+
+/* xdplus: canary value for struct binder_transaction. Deliberately has no zero
+ * byte, so a partial clear is as visible as a full one.
+ */
+#define XD_BINDER_CANARY 0x5844504cu	/* "XDPL" */
 
 struct binder_transaction {
 	int debug_id;
@@ -2902,6 +2916,14 @@ static void binder_transaction(struct binder_proc *proc,
 		return_error = BR_FAILED_REPLY;
 		goto err_alloc_t_failed;
 	}
+	/* xdplus: arm the width canary. The two asserts are the whole reason the
+	 * canary is safe to add: it must sit in padding that already existed, so
+	 * that neither binder_work nor anything embedding it changes shape and
+	 * the captured c[] offsets from earlier fires stay comparable.
+	 */
+	BUILD_BUG_ON(sizeof(struct binder_work) != 24);
+	BUILD_BUG_ON(offsetof(struct binder_transaction, from) != 32);
+	t->work.xd_canary = XD_BINDER_CANARY;
 #ifdef BINDER_MONITOR
 	memcpy(&t->timestamp, &e->timestamp, sizeof(struct timespec));
 	/* do_gettimeofday(&t->tv); */
@@ -3900,9 +3922,36 @@ static int binder_has_thread_work(struct binder_thread *thread)
 
 /* xdplus: de-duplication state for the spin witness below. Written only under
  * the binder global lock, so plain variables are sufficient.
+ *
+ * A single last-seen pointer is not enough: when two processes are wedged on
+ * two different entries at once, they alternate, every switch looks like a new
+ * offender, and the witness floods the log again (233995 reports for 2 distinct
+ * pointers, 254 messages dropped). Keep a small set of recently reported
+ * pointers instead, so any interleaving of a handful of victims stays quiet
+ * after the first report of each.
  */
-static struct binder_work *xd_last_w_reported;
+#define XD_REPORTED_MAX 16
+static struct binder_work *xd_reported[XD_REPORTED_MAX];
+static int xd_reported_n;
 static int xd_report_count;
+
+/* Returns true the first time this entry is seen, false afterwards. Once the
+ * table is full every further distinct entry is treated as already-reported:
+ * sixteen distinct offenders is far past the point where more lines add
+ * anything, and silence is better than a flood under the global lock.
+ */
+static bool xd_report_once(struct binder_work *w)
+{
+	int i;
+
+	for (i = 0; i < xd_reported_n; i++)
+		if (xd_reported[i] == w)
+			return false;
+	if (xd_reported_n == XD_REPORTED_MAX)
+		return false;
+	xd_reported[xd_reported_n++] = w;
+	return true;
+}
 
 static int binder_thread_read(struct binder_proc *proc,
 			      struct binder_thread *thread,
@@ -4050,8 +4099,7 @@ retry:
 			 * before any of it could be read. All of that ran under the
 			 * binder global lock, making the flood part of the problem.
 			 */
-			if (w != xd_last_w_reported) {
-				xd_last_w_reported = w;
+			if (xd_report_once(w)) {
 				xd_report_count++;
 				pr_crit("binder: xdplus spin detected %d:%d w=%p type=%d iters=%d (report #%d)\n",
 					proc->pid, thread->pid, w,
@@ -4080,6 +4128,27 @@ retry:
 						&proc->todo, &thread->todo);
 					pr_crit("binder: xdplus illegal-w container %p debug_id=%d\n",
 						c, (int)c[0]);
+					/* The width of the write, and where the
+					 * object sits in its slab page. c[7] is
+					 * the canary in the padding directly
+					 * after work.type: intact means the
+					 * store was exactly the 4 bytes of
+					 * work.type, cleared means 8 bytes or
+					 * more. Every fire so far landed on a
+					 * 256-byte boundary (the kmalloc-256
+					 * bucket) at a varying slot, so log the
+					 * slot to test that across more samples.
+					 */
+					pr_crit("binder: xdplus illegal-w canary %08x (%s) pgoff=%03lx slot=%lu\n",
+						c[7],
+						c[7] == XD_BINDER_CANARY ?
+							"INTACT: 4-byte store" :
+							c[7] == 0 ?
+							"ZEROED: >=8-byte store" :
+							"ALTERED",
+						(unsigned long)c & (PAGE_SIZE - 1),
+						((unsigned long)c &
+						 (PAGE_SIZE - 1)) / 256);
 					pr_crit("binder: xdplus illegal-w c[0-7]  %08x %08x %08x %08x %08x %08x %08x %08x\n",
 						c[0], c[1], c[2], c[3],
 						c[4], c[5], c[6], c[7]);
