@@ -813,6 +813,7 @@ static int adc_early_suspend(struct platform_device *pdev, pm_message_t state)
 	if(gp_kp==NULL)
 	return 0;
 	del_timer_sync(&gp_kp->timer);
+	cancel_work_sync(&gp_kp->work_update);
 	//keytouch_release(kp);
 	//input_sync(kp->input_joystick);
 	gp_kp->suspend_flag = 1;
@@ -875,8 +876,6 @@ int ps3_input_device(struct kp *kp)
 	kp->ps3_input_joystick = input_allocate_device();
 	if (!kp->ps3_input_joystick) {
 		printk("---------- allocate ps3_input_joystick fail ------------\n");
-		kfree(kp);
-		input_free_device(kp->ps3_input_joystick);
 		return -ENOMEM;
 	}
 
@@ -911,8 +910,8 @@ int ps3_input_device(struct kp *kp)
 	ret = input_register_device(kp->ps3_input_joystick);
 	if (ret < 0) {
 		printk(KERN_ERR "register ps3_input_joystick device fail\n");
-		kfree(kp);
 		input_free_device(kp->ps3_input_joystick);
+		kp->ps3_input_joystick = NULL;
 		return -EINVAL;
 	}
 
@@ -927,8 +926,6 @@ int cf_input_device(struct kp *kp)
         kp->cf_input_joystick = input_allocate_device();
         if (!kp->cf_input_joystick) {
                 printk("---------- allocate cf_input_joystick fail ------------\n");
-                kfree(kp);
-                input_free_device(kp->cf_input_joystick);
                 return -ENOMEM;
         }
 
@@ -942,8 +939,8 @@ int cf_input_device(struct kp *kp)
         ret = input_register_device(kp->cf_input_joystick);
         if (ret < 0) {
                 printk(KERN_ERR "register cf_input_joystick device fail\n");
-                kfree(kp);
                 input_free_device(kp->cf_input_joystick);
+                kp->cf_input_joystick = NULL;
                 return -EINVAL;
         }
 
@@ -959,8 +956,6 @@ int xbox_input_device(struct kp *kp)
 	kp->xbox_input_joystick = input_allocate_device();
 	if (!kp->xbox_input_joystick) {
 		printk("---------- allocate xbox_input_joystick fail ------------\n");
-		kfree(kp);
-		input_free_device(kp->xbox_input_joystick);
 		return -ENOMEM;
 	}
 
@@ -998,8 +993,8 @@ int xbox_input_device(struct kp *kp)
 	ret = input_register_device(kp->xbox_input_joystick);
 	if (ret < 0) {
 		printk(KERN_ERR "register xbox_input_joystick device fail\n");
-		kfree(kp);
 		input_free_device(kp->xbox_input_joystick);
+		kp->xbox_input_joystick = NULL;
 		return -EINVAL;
 	}
 
@@ -1015,8 +1010,6 @@ int xbox_input_device(struct kp *kp)
 	kp->xbox_input_joystick = input_allocate_device();
 	if (!kp->xbox_input_joystick) {
 		printk("---------- allocate xbox_input_joystick fail ------------\n");
-		kfree(kp);
-		input_free_device(kp->xbox_input_joystick);
 		return -ENOMEM;
 	}
 
@@ -1052,8 +1045,8 @@ int xbox_input_device(struct kp *kp)
 	ret = input_register_device(kp->xbox_input_joystick);
 	if (ret < 0) {
 		printk(KERN_ERR "register xbox_input_joystick device fail\n");
-		kfree(kp);
 		input_free_device(kp->xbox_input_joystick);
+		kp->xbox_input_joystick = NULL;
 		return -EINVAL;
 	}
 
@@ -1091,10 +1084,8 @@ static int adc_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 printk("%s %d\n",__func__,__LINE__);
 	kp = kzalloc(sizeof(struct kp), GFP_KERNEL);
-	if (!kp) {
-		kfree(kp);
+	if (!kp)
 		return -ENOMEM;
-	}
 	gp_kp=kp;
 
 	kp->stick_flag[0] = 0;
@@ -1183,6 +1174,8 @@ static int adc_remove(struct platform_device *pdev)
 	}
 
 	gp_kp = NULL;
+	del_timer_sync(&kp->timer);
+	cancel_work_sync(&kp->work_update);
 	kfree(kp);
 
 	return 0;
