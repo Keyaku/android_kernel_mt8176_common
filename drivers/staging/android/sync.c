@@ -71,6 +71,28 @@ static void sync_timeline_free(struct kref *kref)
 	if (obj->ops->release_obj)
 		obj->ops->release_obj(obj);
 
+	/*
+	 * Drain any concurrent holder of child_list_lock before freeing the
+	 * object that contains it. sync_pt_create() passes &obj->child_list_lock
+	 * to fence_init() as the fence lock, so every sync_pt's fence->lock
+	 * points inside this struct; freeing it while another CPU is inside
+	 * sync_timeline_signal() leaves that CPU spinning on a lock in freed
+	 * memory.
+	 *
+	 * MediaTek ships exactly this workaround guarded on CONFIG_MACH_MT8167 /
+	 * MT8173 / MT6739. That symbol is defined nowhere -- not in Kconfig, any
+	 * defconfig, or the generated autoconf -- so it never compiled for them
+	 * either; verified here by disassembling sync_timeline_free() before and
+	 * after copying it verbatim, both 17 instructions with no locking. Use
+	 * the symbol this tree actually sets.
+	 */
+	if (IS_ENABLED(CONFIG_ARCH_MT8173)) {
+		unsigned long flags;
+
+		spin_lock_irqsave(&obj->child_list_lock, flags);
+		spin_unlock_irqrestore(&obj->child_list_lock, flags);
+	}
+
 	kfree(obj);
 }
 
