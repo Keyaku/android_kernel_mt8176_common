@@ -1,27 +1,24 @@
+# clangd config for the MT8176 3.18.79 kernel.
+#
+# compile_commands.json in this directory is a symlink to the database generated from the
+# in-tree build's .cmd files (scripts/gen_compile_commands.sh kernel). It carries the real
+# include paths and defines, so no hand-maintained -isystem list is needed here.
+#
+# Nearly every entry is aarch64-linux-android-gcc 4.9; the flags below are the gcc-only ones
+# that clangd's clang frontend rejects.
 CompileFlags:
-  Add:
-    - -target
-    - aarch64-linux-android
-    - -isystem
-    - /mnt/antion/Data/android/GPD/XD+/reversing/.kbuild/kout_delta/arch/arm64/include
-    - -isystem
-    - /mnt/antion/Data/android/GPD/XD+/reversing/.kbuild/kout_delta/usr/include
-    - -isystem
-    - /mnt/antion/Data/android/GPD/XD+/reversing/.kbuild/kout_delta/include
-    - -isystem
-    - /mnt/antion/Data/android/GPD/XD+/reversing/sources/android_kernel_mt8176_common/arch/arm64/include
-    - -isystem
-    - /mnt/antion/Data/android/GPD/XD+/reversing/sources/android_kernel_mt8176_common/arch/arm64/include/uapi
-    - -isystem
-    - /mnt/antion/Data/android/GPD/XD+/reversing/sources/android_kernel_mt8176_common/arch/arm64/include/generated/uapi
-    - -isystem
-    - /mnt/antion/Data/android/GPD/XD+/reversing/sources/android_kernel_mt8176_common/include
-    - -isystem
-    - /mnt/antion/Data/android/GPD/XD+/reversing/sources/android_kernel_mt8176_common/include/uapi
-    - -isystem
-    - /mnt/antion/Data/android/GPD/XD+/reversing/sources/android_kernel_mt8176_common/include/generated/uapi
-    - -isystem
-    - /mnt/antion/Data/android/GPD/XD+/reversing/sources/los18/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/lib/gcc/aarch64-linux-android/4.9.x/include
   Remove:
-    - -isystem
-    - -I
+    - --param*
+    - -fconserve-stack
+    - -fno-var-tracking-assignments
+    - -fno-ipa-sra
+    - -frename-registers
+    - -Wa,*
+    - -Werror*
+    - -Wframe-larger-than=*
+    - -Wno-error=maybe-uninitialized
+  Add:
+    - -Wno-unknown-attributes
+    - -Wno-unknown-warning-option
+Diagnostics:
+  UnusedIncludes: None
