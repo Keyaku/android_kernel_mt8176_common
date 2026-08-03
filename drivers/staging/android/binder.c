@@ -400,15 +400,6 @@ struct binder_work {
 		BINDER_WORK_DEAD_BINDER_AND_CLEAR,
 		BINDER_WORK_CLEAR_DEATH_NOTIFICATION,
 	} type;
-	/* xdplus: canary occupying the trailing padding this struct already had,
-	 * directly after the ->type field that every livelock fire finds zeroed.
-	 * It fills existing pad rather than adding space, so sizeof() and every
-	 * containing struct's layout are unchanged (asserted at the transaction
-	 * allocation site) and the bug sees the same object it always did. Its
-	 * only job is to measure the width of the write: intact means exactly
-	 * the 4 bytes of ->type were cleared, cleared means 8 bytes or wider.
-	 */
-	u32 xd_canary;
 };
 
 struct binder_node {
@@ -570,26 +561,8 @@ struct binder_thread {
 	struct binder_stats stats;
 };
 
-/* xdplus: canary value for struct binder_transaction. Deliberately has no zero
- * byte, so a partial clear is as visible as a full one.
- */
-#define XD_BINDER_CANARY 0x5844504cu	/* "XDPL" */
-
-/* xdplus: private slab cache for transactions. Created in binder_init(); see the
- * comment there for what it is testing.
- */
-static struct kmem_cache *xd_transaction_cache;
-
 struct binder_transaction {
 	int debug_id;
-	/* xdplus: second canary, in the padding debug_id already left before the
-	 * 8-byte-aligned work member. The first canary showed the corrupting
-	 * store starts at offset 24 and is at least 8 bytes wide; this one bounds
-	 * it on the other side. Intact means the write does not extend backwards,
-	 * which together with to_proc surviving at offset 48 pins the store to
-	 * the 8..24 byte range starting at 24.
-	 */
-	u32 xd_canary_pre;
 	struct binder_work work;
 	struct binder_thread *from;
 	struct binder_transaction *from_parent;
@@ -2170,7 +2143,7 @@ static void binder_pop_transaction(struct binder_thread *target_thread,
 #ifdef BINDER_MONITOR
 	binder_cancel_bwdog(t);
 #endif
-	kmem_cache_free(xd_transaction_cache, t);
+	kfree(t);
 	binder_stats_deleted(BINDER_STAT_TRANSACTION);
 }
 
@@ -2699,29 +2672,6 @@ static int binder_fixup_parent(struct binder_proc *proc,
 	return 0;
 }
 
-/* xdplus: producer-side check for the work entry whose ->type is found zeroed
- * by the witness in binder_thread_read. Called with the binder global lock
- * held, from the points where a transaction is enqueued and where an async
- * transaction is later moved onto a real todo list, so an illegal type can be
- * attributed to a window rather than guessed at. Bounded, because the paths it
- * sits on are hot and a flood under this lock is what destroyed the first
- * capture.
- */
-static int xd_producer_reports;
-
-static void xd_check_w(const char *where, struct binder_work *w, int debug_id,
-		       int is_async)
-{
-	if (likely(w->type >= BINDER_WORK_TRANSACTION &&
-		   w->type <= BINDER_WORK_CLEAR_DEATH_NOTIFICATION))
-		return;
-	if (xd_producer_reports >= 16)
-		return;
-	xd_producer_reports++;
-	pr_crit("binder: xdplus ILLEGAL TYPE AT %s: w=%p type=%d debug_id=%d async=%d (report #%d)\n",
-		where, w, (int)w->type, debug_id, is_async, xd_producer_reports);
-}
-
 static void binder_transaction(struct binder_proc *proc,
 			       struct binder_thread *thread,
 			       struct binder_transaction_data *tr, int reply,
@@ -2921,7 +2871,7 @@ static void binder_transaction(struct binder_proc *proc,
 	e->to_proc = target_proc->pid;
 
 	/* TODO: reuse incoming transaction for reply */
-	t = kmem_cache_zalloc(xd_transaction_cache, GFP_KERNEL);
+	t = kzalloc(sizeof(*t), GFP_KERNEL);
 	if (t == NULL) {
 #ifdef MTK_BINDER_DEBUG
 		binder_user_error("%d:%d transaction allocation failed\n", proc->pid, thread->pid);
@@ -2929,16 +2879,6 @@ static void binder_transaction(struct binder_proc *proc,
 		return_error = BR_FAILED_REPLY;
 		goto err_alloc_t_failed;
 	}
-	/* xdplus: arm the width canary. The two asserts are the whole reason the
-	 * canary is safe to add: it must sit in padding that already existed, so
-	 * that neither binder_work nor anything embedding it changes shape and
-	 * the captured c[] offsets from earlier fires stay comparable.
-	 */
-	BUILD_BUG_ON(sizeof(struct binder_work) != 24);
-	BUILD_BUG_ON(offsetof(struct binder_transaction, work) != 8);
-	BUILD_BUG_ON(offsetof(struct binder_transaction, from) != 32);
-	t->work.xd_canary = XD_BINDER_CANARY;
-	t->xd_canary_pre = XD_BINDER_CANARY;
 #ifdef BINDER_MONITOR
 	memcpy(&t->timestamp, &e->timestamp, sizeof(struct timespec));
 	/* do_gettimeofday(&t->tv); */
@@ -3371,13 +3311,6 @@ static void binder_transaction(struct binder_proc *proc,
 	}
 	t->work.type = BINDER_WORK_TRANSACTION;
 	list_add_tail(&t->work.entry, target_list);
-	/* xdplus: the consumer-side witness catches this transaction later with
-	 * work.type == 0 and every other field intact. Read the type back here,
-	 * after the entry is on the list, to split "never took the assignment"
-	 * from "zeroed afterwards while queued".
-	 */
-	xd_check_w("post-enqueue", &t->work, t->debug_id,
-		   target_node && target_list == &target_node->async_todo);
 	tcomplete->type = BINDER_WORK_TRANSACTION_COMPLETE;
 	list_add_tail(&tcomplete->entry, &thread->todo);
 #ifdef RT_PRIO_INHERIT
@@ -3463,7 +3396,7 @@ err_alloc_tcomplete_failed:
 #ifdef BINDER_MONITOR
 	binder_cancel_bwdog(t);
 #endif
-	kmem_cache_free(xd_transaction_cache, t);
+	kfree(t);
 	binder_stats_deleted(BINDER_STAT_TRANSACTION);
 err_alloc_t_failed:
 err_bad_call_stack:
@@ -3665,25 +3598,14 @@ static int binder_thread_write(struct binder_proc *proc,
 					buffer->target_node->has_async_transaction = 0;
 					buffer->target_node->async_pid = 0;
 				} else {
-					/* xdplus: check on the way out of async_todo */
-					xd_check_w("async-move",
-						   list_entry(buffer->target_node->async_todo.next,
-							      struct binder_work, entry),
-						   buffer->target_node->debug_id, 1);
 					list_move_tail(buffer->target_node->async_todo.next, &thread->todo);
 					buffer->target_node->async_pid = thread->pid;
 				}
 #else
 				if (list_empty(&buffer->target_node->async_todo))
 					buffer->target_node->has_async_transaction = 0;
-				else {
-					/* xdplus: check on the way out of async_todo */
-					xd_check_w("async-move",
-						   list_entry(buffer->target_node->async_todo.next,
-							      struct binder_work, entry),
-						   buffer->target_node->debug_id, 1);
+				else
 					list_move_tail(buffer->target_node->async_todo.next, &thread->todo);
-				}
 #endif
 			}
 			trace_binder_transaction_buffer_release(buffer);
@@ -3935,39 +3857,6 @@ static int binder_has_thread_work(struct binder_thread *thread)
 		(thread->looper & BINDER_LOOPER_STATE_NEED_RETURN);
 }
 
-/* xdplus: de-duplication state for the spin witness below. Written only under
- * the binder global lock, so plain variables are sufficient.
- *
- * A single last-seen pointer is not enough: when two processes are wedged on
- * two different entries at once, they alternate, every switch looks like a new
- * offender, and the witness floods the log again (233995 reports for 2 distinct
- * pointers, 254 messages dropped). Keep a small set of recently reported
- * pointers instead, so any interleaving of a handful of victims stays quiet
- * after the first report of each.
- */
-#define XD_REPORTED_MAX 16
-static struct binder_work *xd_reported[XD_REPORTED_MAX];
-static int xd_reported_n;
-static int xd_report_count;
-
-/* Returns true the first time this entry is seen, false afterwards. Once the
- * table is full every further distinct entry is treated as already-reported:
- * sixteen distinct offenders is far past the point where more lines add
- * anything, and silence is better than a flood under the global lock.
- */
-static bool xd_report_once(struct binder_work *w)
-{
-	int i;
-
-	for (i = 0; i < xd_reported_n; i++)
-		if (xd_reported[i] == w)
-			return false;
-	if (xd_reported_n == XD_REPORTED_MAX)
-		return false;
-	xd_reported[xd_reported_n++] = w;
-	return true;
-}
-
 static int binder_thread_read(struct binder_proc *proc,
 			      struct binder_thread *thread,
 			      binder_uintptr_t binder_buffer, size_t size,
@@ -3976,8 +3865,6 @@ static int binder_thread_read(struct binder_proc *proc,
 	void __user *buffer = (void __user *)(uintptr_t) binder_buffer;
 	void __user *ptr = buffer + *consumed;
 	void __user *end = buffer + size;
-	void __user *xd_last_ptr = NULL;
-	int xd_stall_iters = 0;
 
 	int ret = 0;
 	int wait_for_proc_work;
@@ -4096,90 +3983,6 @@ retry:
 				goto retry;
 			break;
 		}
-
-		/* xdplus: witness for the binder_thread_read spin (list-corruption
-		 * livelock under sustained media/GPU load). If the loop keeps
-		 * re-picking work without advancing the user buffer, log the
-		 * work type once it looks like a real stall and bail out of the
-		 * loop — return partial data and let userspace retry — rather
-		 * than spin with the binder lock held into a device wedge.
-		 */
-		if (ptr == xd_last_ptr && ++xd_stall_iters >= 100) {
-			/* Report each offending entry ONCE, not once per ioctl retry.
-			 * Userspace retries immediately and forever, so the naive
-			 * version emitted thousands of identical lines per second: it
-			 * overflowed the kernel log (6000+ messages dropped between
-			 * surviving lines), wrapped the 64 KB RAM console, and lost
-			 * the dump below — the one line that is actually diagnostic —
-			 * before any of it could be read. All of that ran under the
-			 * binder global lock, making the flood part of the problem.
-			 */
-			if (xd_report_once(w)) {
-				xd_report_count++;
-				pr_crit("binder: xdplus spin detected %d:%d w=%p type=%d iters=%d (report #%d)\n",
-					proc->pid, thread->pid, w,
-					w ? (int)w->type : -1, xd_stall_iters,
-					xd_report_count);
-				/* The entry itself is what names the producer: zeroed
-				 * link fields say slab reuse, plausible ones say a wild
-				 * write.
-				 */
-				if (w) {
-					/* Both candidate containers start
-					 * "int debug_id; struct binder_work work;",
-					 * so the container is at w - 8 and its
-					 * debug_id is the first word of that.
-					 * Dumping from there names the object:
-					 * a live debug_id identifies it in the
-					 * transaction log, and the fields past
-					 * ->work separate a binder_transaction
-					 * (from/to pointers, code, flags) from a
-					 * binder_node (rb_node/proc).
-					 */
-					u32 *c = (u32 *)((char *)w - 8);
-
-					pr_crit("binder: xdplus illegal-w dump %p: next=%p prev=%p proc_todo=%p thread_todo=%p\n",
-						w, w->entry.next, w->entry.prev,
-						&proc->todo, &thread->todo);
-					pr_crit("binder: xdplus illegal-w container %p debug_id=%d\n",
-						c, (int)c[0]);
-					/* The width of the write, and where the
-					 * object sits in its slab page. c[7] is
-					 * the canary in the padding directly
-					 * after work.type: intact means the
-					 * store was exactly the 4 bytes of
-					 * work.type, cleared means 8 bytes or
-					 * more. Every fire so far landed on a
-					 * 256-byte boundary (the kmalloc-256
-					 * bucket) at a varying slot, so log the
-					 * slot to test that across more samples.
-					 */
-					pr_crit("binder: xdplus illegal-w canary pre=%08x post=%08x (%s) pgoff=%03lx slot=%lu\n",
-						c[1], c[7],
-						c[1] != XD_BINDER_CANARY ?
-							"BOTH: store extends below offset 24" :
-						c[7] == XD_BINDER_CANARY ?
-							"POST INTACT: 4-byte store at 24" :
-							c[7] == 0 ?
-							"POST ZEROED: 8..24-byte store at 24" :
-							"POST ALTERED",
-						(unsigned long)c & (PAGE_SIZE - 1),
-						((unsigned long)c &
-						 (PAGE_SIZE - 1)) / 256);
-					pr_crit("binder: xdplus illegal-w c[0-7]  %08x %08x %08x %08x %08x %08x %08x %08x\n",
-						c[0], c[1], c[2], c[3],
-						c[4], c[5], c[6], c[7]);
-					pr_crit("binder: xdplus illegal-w c[8-15] %08x %08x %08x %08x %08x %08x %08x %08x\n",
-						c[8], c[9], c[10], c[11],
-						c[12], c[13], c[14], c[15]);
-					pr_crit("binder: xdplus illegal-w c[16-23] %08x %08x %08x %08x %08x %08x %08x %08x\n",
-						c[16], c[17], c[18], c[19],
-						c[20], c[21], c[22], c[23]);
-				}
-			}
-			break;
-		}
-		xd_last_ptr = ptr;
 
 		if (end - ptr < sizeof(tr) + 4)
 			break;
@@ -4460,7 +4263,7 @@ retry:
 				binder_update_transaction_ttid(&binder_transaction_log, t);
 			}
 #endif
-			kmem_cache_free(xd_transaction_cache, t);
+			kfree(t);
 			binder_stats_deleted(BINDER_STAT_TRANSACTION);
 		}
 		break;
@@ -4507,7 +4310,7 @@ static void binder_release_work(struct list_head *list)
 #ifdef BINDER_MONITOR
 					binder_cancel_bwdog(t);
 #endif
-					kmem_cache_free(xd_transaction_cache, t);
+					kfree(t);
 					binder_stats_deleted(BINDER_STAT_TRANSACTION);
 				}
 			}
@@ -6189,40 +5992,9 @@ BINDER_DEBUG_ENTRY(stats);
 BINDER_DEBUG_ENTRY(transactions);
 BINDER_DEBUG_ENTRY(transaction_log);
 
-/* xdplus: private slab cache for struct binder_transaction.
- *
- * The corrupting store lands at a fixed offset inside a live, otherwise
- * perfectly consistent transaction, is 8-byte aligned and looks like a single
- * NULL pointer write. That is the shape of a write through a stale pointer to
- * a *different* object that used to live at this address. While transactions
- * come from the shared kmalloc-256 bucket, that other object can be any
- * allocation in the kernel of a similar size.
- *
- * Giving transactions their own cache removes every foreign allocation from
- * the pool they are drawn from. If the corruption stops, the writer holds a
- * stale pointer to something that is not a binder transaction, and this is the
- * fix as well as the diagnosis. If it continues, the writer is either aiming
- * at binder's own memory or is not a CPU store at all.
- *
- * The empty constructor is deliberate: this kernel predates SLAB_NOMERGE, and
- * SLUB refuses to merge any cache that has a ctor. Without it the cache would
- * be folded straight back into kmalloc-256 and the experiment would silently
- * test nothing.
- */
-static void xd_transaction_ctor(void *p)
-{
-}
-
 static int __init binder_init(void)
 {
 	int ret;
-
-	xd_transaction_cache = kmem_cache_create("binder_transaction_xd",
-						 sizeof(struct binder_transaction),
-						 0, SLAB_HWCACHE_ALIGN,
-						 xd_transaction_ctor);
-	if (!xd_transaction_cache)
-		return -ENOMEM;
 #ifdef BINDER_MONITOR
 	struct task_struct *th;
 
