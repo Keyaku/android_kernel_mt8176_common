@@ -6,7 +6,7 @@
  * change right stick range from -1 to 1
  * fixed self-test suspend release
  * add key and joystick self-test
- * add early suspend 
+ * add early suspend
  * add hot key mirco
  * change to X-input mode
  * add exchange L1/L2 and R1/R2
@@ -74,7 +74,7 @@
 
 //default mode, 0 is PS3 mode, 1 is XBOX mode
 int ioctl_xbox = 0;
-//default exchange, 0 is exchange, 1 is default 
+//default exchange, 0 is exchange, 1 is default
 int ioctl_exchange = 1;
 
 int cf_mode = 0;
@@ -86,14 +86,14 @@ static int key_param[39];
 
 struct joystick_axis {
 	unsigned char *name;
-	int code;       
-	int code2;       
+	int code;
+	int code2;
 };
 
 struct game_key{
 	unsigned char *name;
-	int ps3_code;       
-	int xbox_code;       
+	int ps3_code;
+	int xbox_code;
 	int value;
 	int old_value;
 	int flag;
@@ -216,7 +216,7 @@ static void gpio_init(struct kp *kp, struct device_node *np)
 {
 	int i,ret;
 	enum of_gpio_flags flags;
-	
+
 	for (i=0; i<kp->keynum; i++) {
 		kp->gamekeys[i].gpio = of_get_named_gpio_flags(np, kp->gamekeys[i].name, 0, &flags);
 		if (gpio_is_valid(kp->gamekeys[i].gpio)) {
@@ -252,7 +252,7 @@ static void read_keys_value(struct kp *kp)
 		for (i=0; i<kp->keynum; i++) {
 			if (kp->gamekeys[i].gpio) {
 				if (ioctl_exchange != 1) {
-					if (i == 4) 
+					if (i == 4)
 						kp->gamekeys[4].value = gpio_get_value(kp->gamekeys[6].gpio) == 1 ? 0 : 1;
 					else if (i == 5)
 						kp->gamekeys[5].value = gpio_get_value(kp->gamekeys[7].gpio) == 1 ? 0 : 1;
@@ -283,7 +283,7 @@ static void read_keys_value(struct kp *kp)
 	//tmp += start;
 	//tmp += select;
 	//end
-	if (!tmp) { 
+	if (!tmp) {
 		keytest = 1;
 	} else {
 		keytest = 0;
@@ -299,7 +299,7 @@ static void js_report(struct kp *kp, int value, int id)
 
 	if (cf_mode)
 		return;
-	
+
 	/**********************************************************/
 	//PS3 and XBOX switch
 	if (kp->xbox) {
@@ -423,7 +423,7 @@ static void scan_left_joystick_touchmapping(struct kp *kp)
 	int tmp;
         tmp=kp->key_value[1];
         kp->key_value[1]=kp->key_value[0];
-        kp->key_value[0]=tmp; 
+        kp->key_value[0]=tmp;
 #endif
 
 }
@@ -631,14 +631,14 @@ static struct attribute *key_attr[] = {
 };
 
 static struct attribute_group key_attr_group = {
-	
+
 	.attrs = key_attr,
 };
 
 static void kp_timer_sr(unsigned long data)
 {
 	struct kp *kp_data=(struct kp *)data;
-	
+
 	schedule_work(&(kp_data->work_update));
 	mod_timer(&kp_data->timer,jiffies+msecs_to_jiffies(10));
 }
@@ -675,7 +675,7 @@ static void update_work_func(struct work_struct *work)
 		} else if (ioctl_xbox == 2) {
 			cf_mode = 1;
 			cf_input_device(kp);
-	
+
 			input_joystick = kp->cf_input_joystick;
 			if (kp->input_mode_old == 1)
 				xbox_uninput_device(kp);
@@ -811,7 +811,7 @@ static int adc_early_suspend(struct platform_device *pdev, pm_message_t state)
 {
 	printk("%s\n",__func__);
 	if(gp_kp==NULL)
-	return 0;
+		return 0;
 	del_timer_sync(&gp_kp->timer);
 	cancel_work_sync(&gp_kp->work_update);
 	//keytouch_release(kp);
@@ -920,31 +920,31 @@ int ps3_input_device(struct kp *kp)
 
 int cf_input_device(struct kp *kp)
 {
-        int  ret;   //i,
+	int  ret;   //i,
 
-        //register joystick
-        kp->cf_input_joystick = input_allocate_device();
-        if (!kp->cf_input_joystick) {
-                printk("---------- allocate cf_input_joystick fail ------------\n");
-                return -ENOMEM;
-        }
+	//register joystick
+	kp->cf_input_joystick = input_allocate_device();
+	if (!kp->cf_input_joystick) {
+			printk("---------- allocate cf_input_joystick fail ------------\n");
+			return -ENOMEM;
+	}
 
-        kp->cf_input_joystick->name = "cf_touch";
-        kp->cf_input_joystick->id.vendor = 0x0001;
-        kp->cf_input_joystick->id.product = 0x0001;
-        kp->cf_input_joystick->id.bustype = BUS_USB;
+	kp->cf_input_joystick->name = "cf_touch";
+	kp->cf_input_joystick->id.vendor = 0x0001;
+	kp->cf_input_joystick->id.product = 0x0001;
+	kp->cf_input_joystick->id.bustype = BUS_USB;
 
-        kp->cf_input_joystick->id.version = 0x0100;
+	kp->cf_input_joystick->id.version = 0x0100;
 
-        ret = input_register_device(kp->cf_input_joystick);
-        if (ret < 0) {
-                printk(KERN_ERR "register cf_input_joystick device fail\n");
-                input_free_device(kp->cf_input_joystick);
-                kp->cf_input_joystick = NULL;
-                return -EINVAL;
-        }
+	ret = input_register_device(kp->cf_input_joystick);
+	if (ret < 0) {
+			printk(KERN_ERR "register cf_input_joystick device fail\n");
+			input_free_device(kp->cf_input_joystick);
+			kp->cf_input_joystick = NULL;
+			return -EINVAL;
+	}
 
-        return 0;
+	return 0;
 }
 
 
@@ -980,7 +980,7 @@ int xbox_input_device(struct kp *kp)
 	input_set_abs_params(kp->xbox_input_joystick, ABS_RX, 0, ADC_MAX, 0, 0);
 	input_set_abs_params(kp->xbox_input_joystick, ABS_RY, 0, ADC_MAX, 0, 0);
 	input_set_abs_params(kp->xbox_input_joystick, ABS_BRAKE, 0, ADC_MAX, 0, 0);
-        input_set_abs_params(kp->xbox_input_joystick, ABS_GAS, 0, ADC_MAX, 0, 0);
+	input_set_abs_params(kp->xbox_input_joystick, ABS_GAS, 0, ADC_MAX, 0, 0);
 	input_set_abs_params(kp->xbox_input_joystick, ABS_HAT0X, -ADC_MAX, ADC_MAX, 0, 0);
 	input_set_abs_params(kp->xbox_input_joystick, ABS_HAT0Y, -ADC_MAX, ADC_MAX, 0, 0);
 	kp->xbox_input_joystick->id.bustype = BUS_USB;
@@ -1216,4 +1216,3 @@ module_exit(adc_exit);
 MODULE_AUTHOR("Samty");
 MODULE_DESCRIPTION("ADC Joystick Driver");
 MODULE_LICENSE("GPL");
-
