@@ -2949,6 +2949,18 @@ static bool hdmi_drv_init_context(void)
 
 static void hdmi_power_enable(int enable)
 {
+	/* The only callers of this wrapper are the early-suspend and
+	 * fb-blank handlers. When the device is actively mirroring, letting
+	 * a screen-off event power the HDMI path down kills it: the path is
+	 * suspended and then deinited, and hdmi_power_on() refuses to
+	 * re-init from the OFF state on the next blank. Keep the external
+	 * path alive through blank cycles; the user still tears mirroring
+	 * down explicitly via hdmictl/Settings. */
+	if (p != NULL && IS_HDMI_ON() && enable == 0) {
+		HDMI_LOG("blank/early-suspend while HDMI is on: keep path alive\n");
+		return;
+	}
+
 	hdmi_ioctl(NULL, MTK_HDMI_POWER_ENABLE, enable);
 }
 
