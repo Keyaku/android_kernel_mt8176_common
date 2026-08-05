@@ -503,35 +503,6 @@ int _ioctl_trigger_session(unsigned long arg)
 
 	session_id = config.session_id;
 
-#ifdef XDPLUS_TRIGGER_PROBE
-	/* Temporary instrumentation (fix-2 hunt): is userspace triggering the
-	 * external session at all? Rate-limited so a 60 Hz primary stream cannot
-	 * flood the ring buffer.
-	 */
-	{
-		static unsigned long xdplus_last_pr;
-		static unsigned int xdplus_prim_cnt, xdplus_ext_cnt, xdplus_other_cnt;
-
-		if (DISP_SESSION_TYPE(session_id) == DISP_SESSION_PRIMARY)
-			xdplus_prim_cnt++;
-		else if (DISP_SESSION_TYPE(session_id) == DISP_SESSION_EXTERNAL)
-			xdplus_ext_cnt++;
-		else
-			xdplus_other_cnt++;
-
-		if (time_after(jiffies, xdplus_last_pr + HZ)) {
-			xdplus_last_pr = jiffies;
-			pr_info("[XDPLUS-TRIG] sess=0x%08x type=%d pf_idx=%d | 1s counts: prim=%u ext=%u other=%u\n",
-				session_id, DISP_SESSION_TYPE(session_id),
-				config.present_fence_idx, xdplus_prim_cnt,
-				xdplus_ext_cnt, xdplus_other_cnt);
-			xdplus_prim_cnt = 0;
-			xdplus_ext_cnt = 0;
-			xdplus_other_cnt = 0;
-		}
-	}
-#endif
-
 	ticket = primary_display_get_ticket();
 
 	session_info = disp_get_session_sync_info_for_debug(session_id);
@@ -593,14 +564,6 @@ int _ioctl_trigger_session(unsigned long arg)
 			       MMProfileFlagPulse, session_id, config.present_fence_idx);
 
 		ret = ext_disp_trigger(0, NULL, session_id);
-
-#ifdef XDPLUS_TRIGGER_PROBE
-		/* This ret is what the blob reports as
-		 * "DISP_IOCTL_TRIGGER_SESSION ... id:20001 err:-1".
-		 */
-		pr_info("[XDPLUS-TRIG] ext ioctl sess=0x%08x pf_idx=%d -> ret=%d\n",
-			session_id, config.present_fence_idx, ret);
-#endif
 
 		mutex_unlock(&disp_session_lock);
 #endif
@@ -1479,37 +1442,6 @@ static int set_primary_buffer(disp_session_input_config session_input)
 				session_input.config[i].layer_enable = 0;
 				/* disp_input_config *input = &session_input.config[i]; */
 			}
-#ifdef XDPLUS_TRIGGER_PROBE
-			/* The panel freezes while mirroring even though the
-			 * composer keeps feeding this session fresh buff_idx. If
-			 * disp_sync_query_buf_info() misses here, the layer is
-			 * silently disabled and OVL0 keeps its last address —
-			 * which is exactly the observed symptom. Log a one-line
-			 * per-second summary of the mva resolution per session.
-			 */
-			{
-				static unsigned long xdplus_mva_last[2];
-				static unsigned int xdplus_mva_ok[2], xdplus_mva_zero[2];
-				int s = (DISP_SESSION_TYPE(session_id) ==
-					 DISP_SESSION_PRIMARY) ? 0 : 1;
-
-				if (dst_mva)
-					xdplus_mva_ok[s]++;
-				else
-					xdplus_mva_zero[s]++;
-
-				if (time_after(jiffies, xdplus_mva_last[s] + HZ)) {
-					xdplus_mva_last[s] = jiffies;
-					pr_info("[XDPLUS-MVA] sess=0x%08x | 1s: mva_ok=%u mva_zero=%u | last L%d idx=%u mva=0x%08x\n",
-						session_id, xdplus_mva_ok[s],
-						xdplus_mva_zero[s], layer_id,
-						session_input.config[i].next_buff_idx,
-						dst_mva);
-					xdplus_mva_ok[s] = 0;
-					xdplus_mva_zero[s] = 0;
-				}
-			}
-#endif
 			/*DISPPR_FENCE
 			   ("S+/L%d/e%d/id%d/%dx%d(%d,%d)(%d,%d)/%s/%d/0x%lx/mva0x%08x\n",
 			   session_input.config[i].layer_id,
@@ -1566,36 +1498,6 @@ static int set_primary_buffer(disp_session_input_config session_input)
 		}
 	}
 
-#ifdef XDPLUS_TRIGGER_PROBE
-	/* Full per-layer view of what the composer hands the primary
-	 * session. The panel freezes while the mirror runs with OVL0 pinned to
-	 * one address even though next_buff_idx keeps climbing, so print every
-	 * configured layer — enabled or not — once a second.
-	 */
-	{
-		static unsigned long xdplus_lay_last;
-
-		if (time_after(jiffies, xdplus_lay_last + HZ)) {
-			xdplus_lay_last = jiffies;
-			for (i = 0; i < session_input.config_layer_num; i++) {
-				int lid = session_input.config[i].layer_id;
-
-				if (lid < 0 || lid >= PRIMARY_DISPLAY_SESSION_LAYER_COUNT)
-					continue;
-				pr_info("[XDPLUS-LAY] sess=0x%08x i=%d L%d en=%u idx=%u | ovl: en=%u addr=0x%lx %ux%u dirty=%u\n",
-					session_id, i, lid,
-					session_input.config[i].layer_enable,
-					session_input.config[i].next_buff_idx,
-					primary_input[lid].layer_en,
-					primary_input[lid].addr,
-					primary_input[lid].src_w,
-					primary_input[lid].src_h,
-					primary_input[lid].dirty);
-			}
-		}
-	}
-#endif
-
 	primary_display_config_input_multiple((primary_disp_input_config *) &primary_input,
 					      (disp_session_input_config *) &session_input);
 
@@ -1627,60 +1529,6 @@ int _ioctl_set_input_buffer(unsigned long arg)
 
 	DISPPR_FENCE("S+/%s%d/count%d\n", disp_session_mode_spy(session_id),
 		     DISP_SESSION_DEV(session_id), s_session_input->config_layer_num);
-
-#ifdef XDPLUS_TRIGGER_PROBE
-	/* The panel is frozen while the mirror runs even though the primary
-	 * session is still triggered ~18/s and OVL0 L0_ADDR stays pinned. Question:
-	 * does the composer stop feeding display 0 new buffers, or does it feed
-	 * them and the kernel drops them? Log the per-session layer-0 address and
-	 * buff_idx, rate-limited to once a second per session.
-	 */
-	{
-		static unsigned long xdplus_sib_last[2];
-		static unsigned int xdplus_sib_cnt[2];
-		static unsigned int xdplus_sib_changed[2];
-		static unsigned int xdplus_sib_lastaddr[2];
-		int slot = -1;
-
-		if (DISP_SESSION_TYPE(session_id) == DISP_SESSION_PRIMARY)
-			slot = 0;
-		else if (DISP_SESSION_TYPE(session_id) == DISP_SESSION_EXTERNAL)
-			slot = 1;
-
-		if (slot >= 0) {
-			unsigned int addr = 0;
-			unsigned int i;
-
-			/* Fold every configured layer's address together, so a
-			 * change on any layer counts — config[] indices are not
-			 * OVL hardware layer indices.
-			 */
-			for (i = 0; i < s_session_input->config_layer_num &&
-				    i < ARRAY_SIZE(s_session_input->config); i++)
-				addr ^= (unsigned int)(unsigned long)
-					s_session_input->config[i].src_phy_addr;
-
-			xdplus_sib_cnt[slot]++;
-			if (addr != xdplus_sib_lastaddr[slot]) {
-				xdplus_sib_changed[slot]++;
-				xdplus_sib_lastaddr[slot] = addr;
-			}
-
-			if (time_after(jiffies, xdplus_sib_last[slot] + HZ)) {
-				xdplus_sib_last[slot] = jiffies;
-				pr_info("[XDPLUS-SIB] sess=0x%08x nlayer=%u | 1s: calls=%u addr_changed=%u | L0 en=%u addr=0x%08x idx=%u src=%ux%u\n",
-					session_id, s_session_input->config_layer_num,
-					xdplus_sib_cnt[slot], xdplus_sib_changed[slot],
-					s_session_input->config[0].layer_enable, addr,
-					s_session_input->config[0].next_buff_idx,
-					s_session_input->config[0].src_width,
-					s_session_input->config[0].src_height);
-				xdplus_sib_cnt[slot] = 0;
-				xdplus_sib_changed[slot] = 0;
-			}
-		}
-	}
-#endif
 
 	DISP_PRINTF(DDP_RESOLUTION_LOG,
 		    "set_input_buffer/%s%d/count%d src(%d %d %d %d, %d) en %d fmt 0x%x dst(%d %d %d %d)\n",

@@ -2012,12 +2012,6 @@ int ext_disp_deinit(char *lcm_name)
 
 	DISPFUNC();
 
-#ifdef XDPLUS_TRIGGER_PROBE
-	/* Deinit is what makes the later resume bail with EXTD_DEINIT. */
-	pr_info("[XDPLUS-EXTPWR] deinit enter state=%d nto=%d caller=%pS\n",
-		pgc->state, pgc->need_trigger_overlay, __builtin_return_address(0));
-#endif
-
 	_ext_disp_path_lock();
 
 	if (pgc->state == EXTD_DEINIT)
@@ -2150,12 +2144,6 @@ int ext_disp_suspend(void)
 
 	DISPFUNC();
 
-#ifdef XDPLUS_TRIGGER_PROBE
-	/* Who suspends a freshly brought-up ext path? */
-	pr_info("[XDPLUS-EXTPWR] suspend enter state=%d nto=%d caller=%pS\n",
-		pgc->state, pgc->need_trigger_overlay, __builtin_return_address(0));
-#endif
-
 	_ext_disp_path_lock();
 
 	if (pgc->state == EXTD_DEINIT || pgc->state == EXTD_SUSPEND) {
@@ -2200,12 +2188,6 @@ done:
 int ext_disp_resume(void)
 {
 	EXT_DISP_STATUS ret = EXT_DISP_STATUS_OK;
-
-#ifdef XDPLUS_TRIGGER_PROBE
-	/* Resume refuses from EXTD_DEINIT, leaving the path dead. */
-	pr_info("[XDPLUS-EXTPWR] resume enter state=%d nto=%d caller=%pS\n",
-		pgc->state, pgc->need_trigger_overlay, __builtin_return_address(0));
-#endif
 
 	_ext_disp_path_lock();
 
@@ -2495,37 +2477,7 @@ done:
 	DISPDBG("hdmi_config_rdma done\n");
 }
 
-#ifdef XDPLUS_TRIGGER_PROBE
-/* Temporary instrumentation: ext triggers are rare (a handful per
- * bring-up), so log EVERY call unthrottled, with the guard inputs before the
- * call and the return value after it. A rate-limited probe hid the 1:1
- * correlation between a rejected trigger and the blob's err:-1.
- */
-static int xdplus_ext_disp_trigger(int blocking, void *callback, unsigned int userdata);
-
 int ext_disp_trigger(int blocking, void *callback, unsigned int userdata)
-{
-	int state_in = pgc->state;
-	int nto_in = pgc->need_trigger_overlay;
-	int active_in = is_hdmi_active();
-	void *handle_in = pgc->dpmgr_handle;
-	int ret;
-
-	ret = xdplus_ext_disp_trigger(blocking, callback, userdata);
-
-	pr_info("[XDPLUS-EXTTRIG] ret=%d in(active=%d state=%d nto=%d handle=%p start=%d trig=%d) out(state=%d nto=%d) caller=%pS\n",
-		ret, active_in, state_in, nto_in, handle_in,
-		_should_start_path(), _should_trigger_path(),
-		pgc->state, pgc->need_trigger_overlay,
-		__builtin_return_address(0));
-
-	return ret;
-}
-
-static int xdplus_ext_disp_trigger(int blocking, void *callback, unsigned int userdata)
-#else
-int ext_disp_trigger(int blocking, void *callback, unsigned int userdata)
-#endif
 {
 	int ret = 0;
 	/* DISPFUNC(); */
