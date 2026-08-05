@@ -33,9 +33,6 @@ obj-$(CONFIG_MTK_FB) += mtkfb_console.o             \
 
 subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/mmp/
 
-# Temporary fix-2 instrumentation: log which display sessions userspace
-# triggers (rate-limited to 1/s). Remove once the external path streams.
-ccflags-y += -DXDPLUS_TRIGGER_PROBE
 # Bound the primary IF_VSYNC wait so an RDMA0_DONE stall cannot latch the
 # whole display pipeline into a permanent freeze. Revertible: drop this flag.
 ccflags-y += -DXDPLUS_PRIM_VSYNC_TIMEOUT
