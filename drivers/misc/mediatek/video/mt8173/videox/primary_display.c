@@ -4094,7 +4094,27 @@ static int _config_ovl_input(primary_disp_input_config *input,
 				primary_display_cmdq_enabled() ? pgc->cmdq_handle_config : NULL);
 
 	/* write fence_id/enable to DRAM using cmdq
-	 * it will be used when release fence (put these after config registers done) */
+	 * it will be used when release fence (put these after config registers done)
+	 *
+	 * These MUST ride the same cmdq handle the caller configured the path on,
+	 * not pgc->cmdq_handle_config. In decouple and decouple-mirror mode the
+	 * caller passes cmdq_handle_ovl1to2_config, and cmdq_handle_config is
+	 * never flushed in those modes: primary_display_trigger() reaches
+	 * _cmdq_flush_config_handle() only through _trigger_display_interface(),
+	 * which is the direct-link path. Queuing the slot writes on the config
+	 * handle there stranded them, so cur_config_fence[] kept the value it had
+	 * when the mode switched, _ovl_fence_release_callback() released against
+	 * that stale index for every later frame, and the input-layer fences were
+	 * prepared but never signalled.
+	 *
+	 * The client-visible result was a mirror that looked fine on both screens
+	 * while every GPU client blocked in sync_wait inside eglMakeCurrent, the
+	 * blob logged "HW operation timeout", and the UI crawled. Measured on
+	 * hardware: primary session layer 0 ran an average fence lag of 213 with
+	 * the mirror up against 1.3 with it down, while the output/interface
+	 * timeline — whose slot writes already ride the correct handle in
+	 * _trigger_ovl_to_memory_mirror() — stayed at 0.
+	 */
 	for (i = 0; i < session_input->config_layer_num; i++) {
 		unsigned int last_fence, cur_fence;
 		disp_input_config *input_cfg = &session_input->config[i];
@@ -4105,17 +4125,17 @@ static int _config_ovl_input(primary_disp_input_config *input,
 		cur_fence = input_cfg->next_buff_idx;
 
 		if (cur_fence != -1 && cur_fence > last_fence)
-			cmdqRecBackupUpdateSlot(pgc->cmdq_handle_config, pgc->cur_config_fence,
+			cmdqRecBackupUpdateSlot(cmdq_handle, pgc->cur_config_fence,
 						layer, cur_fence);
 
 		/* for dim_layer/disable_layer/no_fence_layer, just release all fences configured */
 		/* for other layers, release current_fence-1 */
 		if (input_cfg->buffer_source == DISP_BUFFER_ALPHA
 		    || input_cfg->layer_enable == 0 || cur_fence == -1)
-			cmdqRecBackupUpdateSlot(pgc->cmdq_handle_config, pgc->subtractor_when_free,
+			cmdqRecBackupUpdateSlot(cmdq_handle, pgc->subtractor_when_free,
 						layer, 0);
 		else
-			cmdqRecBackupUpdateSlot(pgc->cmdq_handle_config, pgc->subtractor_when_free,
+			cmdqRecBackupUpdateSlot(cmdq_handle, pgc->subtractor_when_free,
 						layer, 1);
 	}
 
