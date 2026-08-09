@@ -58,3 +58,19 @@ CONFIG_MTK_SYNC=y
 # driver bound and reads "--" is a genuine NAK, not a skip. Cross-check against
 # /sys/bus/i2c/devices/*/driver.
 CONFIG_I2C_CHARDEV=y
+#
+# /data file-based encryption (FBE v1). ext4's crypto sources are present and
+# unmodified by MTK in this tree; only the Kconfig switch was off. Selects pull
+# in CRYPTO_AES/CBC/ECB/XTS/CTS/CTR/SHA256, KEYS and ENCRYPTED_KEYS.
+#
+# FBE, not FDE: dm-crypt + xts-aes-ce are already available and FDE would need
+# no kernel change at all, but FDE is deprecated in Android 10 and removed in
+# Android 12, so it is a dead end against moving this port up the LineageOS
+# versions. A 3.18 kernel has no FS_IOC_ADD_ENCRYPTION_KEY, and vold handles
+# that: KeyUtil.cpp's isFsKeyringSupported() gets ENOTTY and falls back to
+# logon session-keyring keys, which is the v1 policy path libfscrypt emits.
+#
+# Enabling this alone changes nothing at runtime — /data only becomes encrypted
+# when the fstab asks for it, and the live fstab is the vendor blob
+# /vendor/etc/fstab.mt8173, not anything in this tree.
+CONFIG_EXT4_FS_ENCRYPTION=y
