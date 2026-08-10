@@ -148,6 +148,34 @@ static struct HDMI_UTIL_FUNCS hdmi_util = { 0 };
 unsigned char hdmi_plug_test_mode = 0;
 unsigned char hdmi_is_boot_time = 0;
 
+/* A sink re-asserts hot-plug once the source starts driving TMDS: it drops HPD
+ * for about a second while it re-locks and then raises it again. The driver used
+ * to follow that all the way down and back up, so every bring-up tore the mirror
+ * down and rebuilt it -- measured at 3.6 s of the 8.9 s a cold-plug bring-up took,
+ * with the picture flashing on, off and on again.
+ *
+ * So a loss of HPD shortly after the transmitter is powered is not believed
+ * immediately. It has to persist for HDMI_HPD_DEBOUNCE_MS before it is reported;
+ * if HPD comes back inside that window nothing is reported at all, because the
+ * hot-plug state was never changed and there is nothing for userspace to redo.
+ * The debounce only arms for HDMI_HPD_SETTLE_MS after the transmitter comes up,
+ * which is the only period this bounce happens in, so a genuine unplug outside
+ * that window is still reported on the very first poll that sees it.
+ */
+#define HDMI_HPD_SETTLE_MS	10000
+#define HDMI_HPD_DEBOUNCE_MS	2000
+static unsigned long hdmi_tmds_start_jiffies;
+static unsigned long hdmi_hpd_low_since;
+static bool hdmi_hpd_low_pending;
+
+/* Set once the sink has been detected and its EDID read on the powered path,
+ * i.e. when the transmitter is genuinely ready for a mode set. Published through
+ * /d/hdmi_pwrpin as ready= so userspace can poll for it instead of sleeping
+ * through a fixed guess. powerenable/clockenable are not that signal -- they flip
+ * when the call returns, not when the hardware settled.
+ */
+static bool hdmi_plugin_ready;
+
 static int hdmi_timer_kthread(void *data);
 static int cec_timer_kthread(void *data);
 static int hdmi_irq_kthread(void *data);
@@ -1182,6 +1210,11 @@ int hdmi_internal_power_on(void)
 	/* hdmi_clockenable = 1; */
 	hdmi_hotplugstate = HDMI_STATE_HOT_PLUG_OUT;
 
+	/* The sink's HPD bounce is measured from here (see the debounce above). */
+	hdmi_tmds_start_jiffies = jiffies;
+	hdmi_hpd_low_pending = false;
+	hdmi_plugin_ready = false;
+
 	/* The CEC clock is enabled once in hdmi_internal_probe() and held for the
 	 * lifetime of the driver, because hot-plug detect lives in that block and
 	 * has to keep working while the transmitter is off. Enabling it again here
@@ -1267,6 +1300,10 @@ void hdmi_internal_power_off(void)
 
 	hdmi_hotplugstate = HDMI_STATE_HOT_PLUG_OUT;
 	hdcp2_version_flag = FALSE;
+
+	hdmi_tmds_start_jiffies = 0;
+	hdmi_hpd_low_pending = false;
+	hdmi_plugin_ready = false;
 
 	HDMI_DisableIrq();
 
@@ -1691,6 +1728,7 @@ static void vPlugDetectService(enum HDMI_CTRL_STATE_T e_state)
 
 	switch (e_state) {
 	case HDMI_STATE_HOT_PLUG_OUT:
+		hdmi_plugin_ready = false;
 		vClearEdidInfo();
 		vHDCPReset();
 		if (hdmi_clockenable == 1) {
@@ -1721,10 +1759,15 @@ static void vPlugDetectService(enum HDMI_CTRL_STATE_T e_state)
 		_HdmiSinkAvCap.bandwidth = Rx_Bandwidth;
 #endif
 
+		/* Sink detected and its EDID read on the powered path: the
+		 * transmitter is ready for a mode set from here.
+		 */
+		hdmi_plugin_ready = true;
 		bData = HDMI_PLUG_IN_AND_SINK_POWER_ON;
 		break;
 
 	case HDMI_STATE_HOT_PLUG_IN_ONLY:
+		hdmi_plugin_ready = false;
 		if (hdmi_clockenable == 0) {
 			HDMI_PLUG_LOG("hdmi irq for clock:hdmi plug in");
 			hdmi_clockenable = 1;
@@ -1934,6 +1977,34 @@ void cec_timer_impl(void)
 		hdmi_cec_mainloop(hdmi_rxcecmode);
 }
 
+/* Decide whether a loss of HPD on the powered path is the sink's re-lock bounce
+ * or a real unplug. Returns true while the loss is still unconfirmed, i.e. while
+ * the caller must do nothing. See the debounce comment at the top of this file.
+ */
+static bool hdmi_hpd_out_is_bounce(void)
+{
+	if (hdmi_tmds_start_jiffies == 0)
+		return false;
+	if (time_after(jiffies,
+		       hdmi_tmds_start_jiffies + msecs_to_jiffies(HDMI_HPD_SETTLE_MS)))
+		return false;
+
+	if (!hdmi_hpd_low_pending) {
+		hdmi_hpd_low_pending = true;
+		hdmi_hpd_low_since = jiffies;
+		HDMI_PLUG_LOG("hdmi hpd low inside the tmds settle window, debouncing\n");
+		return true;
+	}
+
+	if (time_before(jiffies,
+			hdmi_hpd_low_since + msecs_to_jiffies(HDMI_HPD_DEBOUNCE_MS)))
+		return true;
+
+	HDMI_PLUG_LOG("hdmi hpd stayed low for %d ms, real plug out\n",
+		      HDMI_HPD_DEBOUNCE_MS);
+	return false;
+}
+
 void hdmi_irq_impl(void)
 {
 	unsigned char bTemp;
@@ -1943,6 +2014,16 @@ void hdmi_irq_impl(void)
 	if (down_interruptible(&hdmi_update_mutex)) {
 		pr_err("[hdmi]can't get semaphore in %s() for boot time\n", __func__);
 		return;
+	}
+
+	/* A debounced HPD loss that came back: the sink finished re-locking to our
+	 * TMDS. Nothing was reported when it went low and the hot-plug state was
+	 * never changed, so there is nothing to undo here either -- just disarm.
+	 */
+	if (hdmi_hpd_low_pending && (hdmi_powerenable == 1)
+	    && (bCheckPordHotPlug(HOTPLUG_MODE) == TRUE)) {
+		hdmi_hpd_low_pending = false;
+		HDMI_PLUG_LOG("hdmi hpd came back, bounce swallowed\n");
 	}
 
 	if (hdmi_is_boot_time == 1) {
@@ -2037,6 +2118,15 @@ void hdmi_irq_impl(void)
 		vSetSharedInfo(SI_HDMI_RECEIVER_STATUS, HDMI_PLUG_OUT);
 		vPlugDetectService(HDMI_STATE_HOT_PLUG_OUT);
 		HDMI_PLUG_LOG("hdmi plug in only, force plug out\n");
+	} else if ((hdmi_hotplugstate != HDMI_STATE_HOT_PLUG_OUT)
+		   && (bCheckPordHotPlug(HOTPLUG_MODE) == FALSE)
+		   && (hdmi_powerenable == 1)
+		   && hdmi_hpd_out_is_bounce()) {
+		/* Unconfirmed HPD loss right after the transmitter came up.
+		 * Report nothing yet: if it is the sink's re-lock bounce this
+		 * costs the mirror nothing at all, and if it is a real unplug
+		 * the branch below reports it HDMI_HPD_DEBOUNCE_MS later.
+		 */
 	} else if ((hdmi_hotplugstate != HDMI_STATE_HOT_PLUG_OUT)
 	    && (bCheckPordHotPlug(HOTPLUG_MODE) == FALSE)
 	    && (hdmi_powerenable == 1)) {
@@ -2442,9 +2532,18 @@ static int hdmi_pwrpin_show(struct seq_file *s, void *unused)
 		return 0;
 	}
 
-	seq_printf(s, "pin=%d value=%d powerenable=%zu clockenable=%zu\n",
+	/* ready= is the transmitter readiness signal userspace polls for after
+	 * powering it, instead of sleeping through a fixed guess: it means the
+	 * sink was detected and its EDID read on the powered path, so a mode set
+	 * will stick. powerenable/clockenable are NOT that -- they flip when the
+	 * call returns, so they only prove the call happened.
+	 */
+	seq_printf(s, "pin=%d value=%d powerenable=%zu clockenable=%zu hotplug=%zu ready=%d\n",
 		   hdmi_power_control_pin, gpio_get_value(hdmi_power_control_pin),
-		   hdmi_powerenable, hdmi_clockenable);
+		   hdmi_powerenable, hdmi_clockenable, hdmi_hotplugstate,
+		   (hdmi_powerenable == 1) && (hdmi_clockenable == 1)
+		   && (hdmi_hotplugstate == HDMI_STATE_HOT_PLUGIN_AND_POWER_ON)
+		   && hdmi_plugin_ready);
 	return 0;
 }
 
