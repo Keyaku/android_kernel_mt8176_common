@@ -692,9 +692,9 @@ int primary_display_get_debug_state(char *stringbuf, int buf_len)
 
 	len +=
 	    scnprintf(stringbuf + len, buf_len - len,
-		      "|State=%s\tlcm_fps=%d\tmax_layer=%d\tmode:%d\tvsync_drop=%d\n",
+		      "|State=%s\tlcm_fps=%d\tmax_layer=%d\tmode:%d\tsession_mode:%d\tvsync_drop=%d\n",
 		      pgc->state == DISP_ALIVE ? "Alive" : "Sleep", pgc->lcm_fps, pgc->max_layer,
-		      pgc->mode, pgc->vsync_drop);
+		      pgc->mode, pgc->session_mode, pgc->vsync_drop);
 	len +=
 	    scnprintf(stringbuf + len, buf_len - len,
 		      "|cmdq_handle_config=0x%p\tcmdq_handle_trigger=0x%p\tdpmgr_handle=0x%p\tovl2mem_path_handle=0x%p\n",
