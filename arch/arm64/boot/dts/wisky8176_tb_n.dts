@@ -50,7 +50,25 @@
 		compatible = "mediatek,msa300";
 		i2c_num	= <2>;
 		i2c_addr = <0x26 0 0 0>;
-		direction = <2>;
+		/*
+		 * Was <2> ({-1,-1,1},{0,1,2} in hwmsen_helper.c's table, i.e. R(180)),
+		 * which matched the panel's portrait mount. The display is now driven
+		 * landscape by rotating the primary display inside SurfaceFlinger, so
+		 * the natural orientation moved a quarter turn and the sensor frame has
+		 * to follow it or auto-rotate sits 90 degrees out.
+		 *
+		 * <1> is ({-1,1,1},{1,0,2}) = R(-90), i.e. out = (raw_y, -raw_x).
+		 *
+		 * Measured, not derived. Note the trap: /sys/bus/platform/drivers/
+		 * gsensor/axis_data reports RAW counts, BEFORE this table is applied --
+		 * the converted values only show up in `dumpsys sensorservice`. Sizing
+		 * the rotation off axis_data as if it were the output lands on <3>,
+		 * which is inverted. Held upright in landscape raw reads (-1010, 0),
+		 * and Android wants x=0, y=+1g for a device upright in its natural
+		 * orientation; <1> maps it there, and the two quarter-turn poses fall
+		 * out as a consistent +/-1g pair on X.
+		 */
+		direction = <1>;
 		power_id = <0xffff>;
 		power_vol = <0>;
 		firlen = <0>;
