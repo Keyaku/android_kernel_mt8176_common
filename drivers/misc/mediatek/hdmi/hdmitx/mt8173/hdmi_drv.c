@@ -1991,6 +1991,42 @@ void hdmi_irq_impl(void)
 		 * again. Measured on hardware as ACTIVE_IN_BOOT followed 53 ms later by
 		 * NO_DEVICE_IN_BOOT with the cable untouched.
 		 */
+	} else if (hdmi_powerenable != 1) {
+		/* Transmitter off, and not the boot-time case above -- this is what a
+		 * plug or unplug after a teardown looks like. Every branch below reads
+		 * the HDMI block (HDCP status, GRL interrupts, DDC) and would fault
+		 * with the block unpowered, and they are all gated on hdmi_powerenable
+		 * for exactly that reason, so a plug in this state used to be seen and
+		 * then dropped on the floor.
+		 *
+		 * HPD itself is readable, because it comes from the CEC block, which is
+		 * clocked from probe. So report the transition and leave the hardware
+		 * alone. ACTIVE_IN_BOOT is the right state to report: it means "a sink
+		 * is there and we cannot bring it up ourselves", which is precisely the
+		 * situation, and it moves the switch userspace watches without trying
+		 * to resume a pipeline that is powered off.
+		 *
+		 * Once userspace powers the transmitter, hdmi_internal_power_on()
+		 * resets hdmi_hotplugstate, so the full branches below re-run and do
+		 * the EDID and HDCP work that was skipped here.
+		 */
+		unsigned char sink_present =
+			(bCheckPordHotPlug(PORD_MODE | HOTPLUG_MODE) == TRUE);
+
+		if (sink_present
+		    && (hdmi_hotplugstate != HDMI_STATE_HOT_PLUGIN_AND_POWER_ON)) {
+			hdmi_hotplugstate = HDMI_STATE_HOT_PLUGIN_AND_POWER_ON;
+			vSetSharedInfo(SI_HDMI_RECEIVER_STATUS, HDMI_PLUG_IN_AND_SINK_POWER_ON);
+			hdmi_util.state_callback(HDMI_STATE_ACTIVE_IN_BOOT);
+			HDMI_PLUG_LOG("hdmi plug in with transmitter off, notify only\n");
+		} else if (!sink_present
+			   && (hdmi_hotplugstate != HDMI_STATE_HOT_PLUG_OUT)) {
+			hdmi_hotplugstate = HDMI_STATE_HOT_PLUG_OUT;
+			vSetSharedInfo(SI_HDMI_RECEIVER_STATUS, HDMI_PLUG_OUT);
+			vClearEdidInfo();
+			hdmi_util.state_callback(HDMI_STATE_NO_DEVICE_IN_BOOT);
+			HDMI_PLUG_LOG("hdmi plug out with transmitter off, notify only\n");
+		}
 	} else if ((hdmi_hotplugstate == HDMI_STATE_HOT_PLUGIN_AND_POWER_ON)
 		&& (bCheckPordHotPlug(HOTPLUG_MODE) == TRUE)
 		&& (bCheckPordHotPlug(PORD_MODE) == FALSE)) {
