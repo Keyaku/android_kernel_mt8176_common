@@ -1946,19 +1946,51 @@ void hdmi_irq_impl(void)
 	}
 
 	if (hdmi_is_boot_time == 1) {
-		HDMI_PLUG_LOG("hdmi_is_boot_time\n");
-		if ((hdmi_hotplugstate != HDMI_STATE_HOT_PLUGIN_AND_POWER_ON)
-				   && (bCheckPordHotPlug(PORD_MODE | HOTPLUG_MODE) == TRUE)) {
+		/* hdmi_is_boot_time is only cleared by hdmi_internal_power_on(),
+		 * hdmi_internal_power_off() and cec_timer_wakeup(), all of which need
+		 * userspace to have powered the transmitter. On a boot where HDMI is
+		 * never enabled the flag therefore stays set for the life of the boot,
+		 * and every hot-plug is handled here rather than by the branches below.
+		 * That makes this the *only* path a plug into an idle device can take,
+		 * so it has to be correct on its own rather than merely good enough for
+		 * the first second after probe.
+		 */
+		unsigned char sink_present =
+			(bCheckPordHotPlug(PORD_MODE | HOTPLUG_MODE) == TRUE);
+
+		HDMI_PLUG_LOG("hdmi_is_boot_time, sink_present = %d, power = %zu, clock = %zu\n",
+			      sink_present, hdmi_powerenable, hdmi_clockenable);
+
+		if (sink_present
+		    && (hdmi_hotplugstate != HDMI_STATE_HOT_PLUGIN_AND_POWER_ON)) {
 			hdmi_hotplugstate = HDMI_STATE_HOT_PLUGIN_AND_POWER_ON;
 			vSetSharedInfo(SI_HDMI_RECEIVER_STATUS, HDMI_PLUG_IN_AND_SINK_POWER_ON);
-			hdmi_checkedid(0);
+			/* hdmi_checkedid() reads the EDID over DDC, which lives in the
+			 * HDMI block -- not in the always-clocked CEC block that HPD
+			 * comes from. Reading it with the transmitter off raises a
+			 * synchronous external abort and resets the SoC. Skip it here;
+			 * the EDID is re-read on the normal path once userspace has
+			 * powered the transmitter.
+			 */
+			if ((hdmi_powerenable == 1) && (hdmi_clockenable == 1))
+				hdmi_checkedid(0);
+			else
+				HDMI_PLUG_LOG("transmitter off, deferring EDID read\n");
 			hdmi_util.state_callback(HDMI_STATE_ACTIVE_IN_BOOT);
-		} else {
+		} else if (!sink_present
+			   && (hdmi_hotplugstate != HDMI_STATE_HOT_PLUG_OUT)) {
 			hdmi_hotplugstate = HDMI_STATE_HOT_PLUG_OUT;
 			vSetSharedInfo(SI_HDMI_RECEIVER_STATUS, HDMI_PLUG_OUT);
 			vClearEdidInfo();
 			hdmi_util.state_callback(HDMI_STATE_NO_DEVICE_IN_BOOT);
 		}
+		/* Otherwise the state is unchanged. The stock code had no such arm:
+		 * its else branch fired whenever the first condition was false, so the
+		 * poll right after a detected plug-in -- which fails the condition
+		 * precisely because the plug-in was recorded -- reported the sink gone
+		 * again. Measured on hardware as ACTIVE_IN_BOOT followed 53 ms later by
+		 * NO_DEVICE_IN_BOOT with the cable untouched.
+		 */
 	} else if ((hdmi_hotplugstate == HDMI_STATE_HOT_PLUGIN_AND_POWER_ON)
 		&& (bCheckPordHotPlug(HOTPLUG_MODE) == TRUE)
 		&& (bCheckPordHotPlug(PORD_MODE) == FALSE)) {
