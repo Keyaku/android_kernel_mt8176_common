@@ -47,6 +47,8 @@
 #include <linux/of_irq.h>
 #include <linux/of_address.h>
 #include <linux/clk.h>
+#include <linux/debugfs.h>
+#include <linux/seq_file.h>
 #include "hdmitx.h"
 #include <linux/of_gpio.h>
 #include <linux/pm_runtime.h>
@@ -151,6 +153,7 @@ static int cec_timer_kthread(void *data);
 static int hdmi_irq_kthread(void *data);
 DEFINE_SEMAPHORE(hdmi_edid_mutex);
 static void vPlugDetectService(enum HDMI_CTRL_STATE_T e_state);
+static void hdmi_pwrpin_debugfs_init(void);
 
 const char *szHdmiPordStatusStr[] = {
 	"HDMI_PLUG_OUT=0",
@@ -1179,10 +1182,11 @@ int hdmi_internal_power_on(void)
 	/* hdmi_clockenable = 1; */
 	hdmi_hotplugstate = HDMI_STATE_HOT_PLUG_OUT;
 
-	if (hdmi_cec_on == 0) {
-		clk_prepare(hdmi_ref_clock[INFRA_SYS_CEC]);
-		clk_enable(hdmi_ref_clock[INFRA_SYS_CEC]);
-	}
+	/* The CEC clock is enabled once in hdmi_internal_probe() and held for the
+	 * lifetime of the driver, because hot-plug detect lives in that block and
+	 * has to keep working while the transmitter is off. Enabling it again here
+	 * would only unbalance the refcount against a release that never comes.
+	 */
 
 	/* hdmi_clock_enable(true); */
 	print_clock_reg();
@@ -2259,6 +2263,30 @@ int hdmi_internal_probe(struct platform_device *pdev, unsigned long u8Res)
 	/*from hdmi timer initial*/
 	print_clock_reg();
 	udelay(2);
+
+	/* The CEC block carries hot-plug detect: IS_HDMI_HTPLG()/IS_HDMI_PORD()
+	 * read RX_EVENT out of the CEC register file, and RX_GEN_WD's
+	 * HDMI_HTPLG_INT_32K_EN arms the 32k-domain plug interrupt. Both need
+	 * this clock, and so do the two calls below, which write CEC registers.
+	 *
+	 * Enable it here and never release it. Until this was done the clock was
+	 * only enabled by hdmi_internal_power_on(), i.e. when userspace powered
+	 * the transmitter, so a cable plugged into an idle device could not be
+	 * detected: the block could neither latch HPD nor raise its interrupt,
+	 * and reading its registers unclocked hangs the bus. The probe-time
+	 * writes below were landing on an unclocked block for the same reason.
+	 *
+	 * Mainline arranges this by giving CEC its own device with only this
+	 * clock and no power domain (drivers/gpu/drm/mediatek/mtk_cec.c), which
+	 * is what lets HPD work with the display off. This tree merges CEC into
+	 * the hdmitx node, so the equivalent has to be done by hand.
+	 */
+	if (hdmi_ref_clock[INFRA_SYS_CEC]) {
+		ret = clk_prepare_enable(hdmi_ref_clock[INFRA_SYS_CEC]);
+		if (ret)
+			pr_err("[hdmi]failed to enable cec clock: %d\n", ret);
+	}
+
 	/* power cec module for cec and hpd/port detect */
 	hdmi_cec_power_on(1);
 	vCec_poweron_32k_26m(cec_clock);
@@ -2290,6 +2318,8 @@ int hdmi_internal_probe(struct platform_device *pdev, unsigned long u8Res)
 	}
 	/* HDMI_EnableIrq(); */
 
+	hdmi_pwrpin_debugfs_init();
+
 	hdmi_is_boot_time = 1;
 	atomic_set(&hdmi_irq_event, 1);
 	wake_up_interruptible(&hdmi_irq_wq);
@@ -2298,6 +2328,78 @@ int hdmi_internal_probe(struct platform_device *pdev, unsigned long u8Res)
 
 }
 
+
+/* Connector +5V rail control, independent of the transmitter.
+ *
+ * A sink may only assert HPD once it detects the source's +5V on pin 18, and
+ * hdmi_internal_power_off() drives this pin low, so after a teardown there is
+ * nothing to detect no matter what is clocked. Powering the transmitter to get
+ * the rail back also starts the TX and its PLLs, which makes it impossible to
+ * tell what the rail alone costs or whether it alone is enough for detection.
+ *
+ * This node exists to separate the two. Writing 1 raises only the rail; 0
+ * lowers it. It deliberately does not change the teardown default, because the
+ * standby cost of holding the rail high has not been measured against this
+ * device's idle drain budget.
+ */
+static ssize_t hdmi_pwrpin_write(struct file *file, const char __user *ubuf,
+				 size_t count, loff_t *ppos)
+{
+	char buf[8];
+	unsigned int on;
+
+	if (count == 0 || count >= sizeof(buf))
+		return -EINVAL;
+	if (copy_from_user(buf, ubuf, count))
+		return -EFAULT;
+	buf[count] = '\0';
+
+	if (kstrtouint(buf, 0, &on))
+		return -EINVAL;
+	if (hdmi_power_control_pin <= 0)
+		return -ENODEV;
+
+	gpio_direction_output(hdmi_power_control_pin, on ? 1 : 0);
+	gpio_set_value(hdmi_power_control_pin, on ? 1 : 0);
+	pr_err("[hdmi]connector rail pin %d set to %u\n", hdmi_power_control_pin,
+	       on ? 1 : 0);
+
+	return count;
+}
+
+static int hdmi_pwrpin_show(struct seq_file *s, void *unused)
+{
+	if (hdmi_power_control_pin <= 0) {
+		seq_puts(s, "no connector rail pin\n");
+		return 0;
+	}
+
+	seq_printf(s, "pin=%d value=%d powerenable=%zu clockenable=%zu\n",
+		   hdmi_power_control_pin, gpio_get_value(hdmi_power_control_pin),
+		   hdmi_powerenable, hdmi_clockenable);
+	return 0;
+}
+
+static int hdmi_pwrpin_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, hdmi_pwrpin_show, NULL);
+}
+
+static const struct file_operations hdmi_pwrpin_fops = {
+	.owner = THIS_MODULE,
+	.open = hdmi_pwrpin_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release,
+	.write = hdmi_pwrpin_write,
+};
+
+static void hdmi_pwrpin_debugfs_init(void)
+{
+	if (!debugfs_create_file("hdmi_pwrpin", 0644, NULL, NULL,
+				 &hdmi_pwrpin_fops))
+		pr_err("[hdmi]failed to create hdmi_pwrpin debugfs node\n");
+}
 
 const struct HDMI_DRIVER *HDMI_GetDriver(void)
 {
