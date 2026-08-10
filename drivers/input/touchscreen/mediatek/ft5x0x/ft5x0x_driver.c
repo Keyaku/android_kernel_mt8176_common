@@ -210,6 +210,24 @@ static void tpd_rotate_270(int *x, int *y)
 	tpd_swap_xy(x, y);
 }
 #endif
+
+#ifdef CONFIG_TPD_LANDSCAPE_NATIVE
+/*
+ * The panel is scanned out landscape while the digitizer is wired
+ * portrait-native, so rotate each point into the display's frame. The
+ * reported axis ranges are swapped to match in mtk_tpd.c; keep the two in
+ * step. Measured against the live panel: display X follows raw Y, display Y
+ * follows inverted raw X.
+ */
+static void tpd_landscape_native(int *x, int *y)
+{
+	int raw_x = *x;
+
+	*x = *y;
+	*y = TPD_RES_X - raw_x;
+}
+#endif
+
 struct touch_info {
 	int y[TPD_SUPPORT_POINTS];
 	int x[TPD_SUPPORT_POINTS];
@@ -357,6 +375,9 @@ static void tpd_down(int x, int y, int p)
 #elif defined(CONFIG_TPD_ROTATE_180)
 	tpd_rotate_180(&x, &y);
 #endif
+#ifdef CONFIG_TPD_LANDSCAPE_NATIVE
+	tpd_landscape_native(&x, &y);
+#endif
 
 #ifdef TPD_SOLVE_CHARGING_ISSUE
 	if (0 != x) {
@@ -381,6 +402,9 @@ static void tpd_up(int x, int y)
 	tpd_rotate_270(&x, &y);
 #elif defined(CONFIG_TPD_ROTATE_180)
 	tpd_rotate_180(&x, &y);
+#endif
+#ifdef CONFIG_TPD_LANDSCAPE_NATIVE
+	tpd_landscape_native(&x, &y);
 #endif
 
 #ifdef TPD_SOLVE_CHARGING_ISSUE

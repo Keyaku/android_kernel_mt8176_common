@@ -159,6 +159,34 @@ config TOUCHSCREEN_MTK_FT5X0X
 
 source "drivers/input/touchscreen/mediatek/ft5x0x/Kconfig"
 
+# Deliberately NOT inside ft5x0x/Kconfig: that file is wrapped in
+# "if TOUCHSCREEN_MTK_FT5X0X", which is never set in this tree -- the Makefile
+# builds ft5x0x/ from CONFIG_TOUCHSCREEN_MTK instead (see its line 14; the
+# per-driver line at 25 is commented out). Everything in that file is therefore
+# unreachable, TPD_ROTATE_* included, and a symbol placed there is dropped from
+# the merged .config without any error.
+config TPD_LANDSCAPE_NATIVE
+	bool "Touch panel reports landscape-native coordinates"
+	depends on TOUCHSCREEN_MTK
+	default n
+	help
+	  Say Y here if the panel is driven as a landscape display but the
+	  digitizer is wired portrait-native, i.e. the display is rotated below
+	  the window manager (SurfaceFlinger's primary display orientation)
+	  rather than by it. The input stack takes its rotation from the
+	  display viewport, which stays at orientation 0 on that route, so the
+	  raw portrait axes are never rotated to match and touches land
+	  transposed.
+
+	  This swaps the reported axis ranges and rotates each point in the
+	  driver, so the digitizer reports the same landscape frame the display
+	  scans out.
+
+	  This is NOT the same as TPD_ROTATE_90, which rescales back into the
+	  portrait range and leaves the reported ranges portrait-shaped.
+
+	  If unsure, say N.
+
 config TOUCHSCREEN_MTK_SYNAPTICS_3320_50
 	bool "Synaptics 5.0inch for Mediatek package"
     default n
