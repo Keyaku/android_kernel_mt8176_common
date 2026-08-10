@@ -65,6 +65,19 @@
 #undef TPD_RES_Y
 extern unsigned long TPD_RES_X;
 extern unsigned long TPD_RES_Y;
+
+/*
+ * Ranges the driver reports to the input core. They follow the panel unless
+ * the digitizer is rotated into a landscape-native frame, in which case they
+ * are swapped to match the rotation applied to every point.
+ */
+#ifdef CONFIG_TPD_LANDSCAPE_NATIVE
+#define TPD_ABS_MAX_X TPD_RES_Y
+#define TPD_ABS_MAX_Y TPD_RES_X
+#else
+#define TPD_ABS_MAX_X TPD_RES_X
+#define TPD_ABS_MAX_Y TPD_RES_Y
+#endif
 extern int tpd_load_status;	/* 0: failed, 1: success */
 extern int tpd_mode;
 extern int tpd_mode_axis;

@@ -74,3 +74,24 @@ CONFIG_I2C_CHARDEV=y
 # when the fstab asks for it, and the live fstab is the vendor blob
 # /vendor/etc/fstab.mt8173, not anything in this tree.
 CONFIG_EXT4_FS_ENCRYPTION=y
+#
+# Landscape-native touch. The panel is driven landscape by rotating the primary
+# display inside SurfaceFlinger (ro.surface_flinger.primary_display_orientation
+# in the vendor build.prop), which is BELOW the window manager. InputFlinger
+# takes its rotation from the display viewport, and on that route the viewport
+# stays at orientation 0 (TouchInputMapper.cpp: mSurfaceOrientation =
+# mViewport.orientation), so the raw portrait axes are never rotated to match.
+# The mapper then scales raw X 720->1280 and raw Y 1280->720 with no rotation
+# and every touch lands transposed.
+#
+# There is no userspace fix: the only touch IDC properties the mapper reads are
+# deviceType, orientationAware (a bool), displayId, wake and calibration —
+# nothing rotates a touch surface independently of its viewport.
+#
+# So the digitizer is rotated in the driver instead, to report the same frame
+# the display scans out. NOT CONFIG_TPD_ROTATE_90: that one rescales back into
+# the portrait range and leaves the reported ranges portrait-shaped.
+#
+# The transform was measured on the live panel, not derived — three corner taps
+# gave display X = raw Y and display Y = TPD_RES_X - raw X.
+CONFIG_TPD_LANDSCAPE_NATIVE=y

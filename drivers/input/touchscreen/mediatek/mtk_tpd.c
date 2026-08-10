@@ -571,8 +571,8 @@ printk("mtk_tpd: TPD_RES_X %lu  TPD_RES_Y%lu",TPD_RES_X, TPD_RES_Y);
 		set_bit(ABS_MT_TOUCH_MINOR, tpd->dev->absbit);
 		set_bit(ABS_MT_POSITION_X, tpd->dev->absbit);
 		set_bit(ABS_MT_POSITION_Y, tpd->dev->absbit);
-		input_set_abs_params(tpd->dev, ABS_MT_POSITION_X, 0, TPD_RES_X, 0, 0);
-		input_set_abs_params(tpd->dev, ABS_MT_POSITION_Y, 0, TPD_RES_Y, 0, 0);
+		input_set_abs_params(tpd->dev, ABS_MT_POSITION_X, 0, TPD_ABS_MAX_X, 0, 0);
+		input_set_abs_params(tpd->dev, ABS_MT_POSITION_Y, 0, TPD_ABS_MAX_Y, 0, 0);
 #if defined(CONFIG_MTK_S3320) || defined(CONFIG_MTK_S3320_47) \
 	|| defined(CONFIG_MTK_S3320_50) || defined(CONFIG_MTK_MIT200) \
 	|| defined(CONFIG_TOUCHSCREEN_SYNAPTICS_S3528) || defined(CONFIG_MTK_S7020) \
@@ -587,10 +587,10 @@ printk("mtk_tpd: TPD_RES_X %lu  TPD_RES_Y%lu",TPD_RES_X, TPD_RES_Y);
 #endif /* CONFIG_MTK_S3320 */
 		TPD_DMESG("Cap touch panel driver\n");
 	}
-	input_set_abs_params(tpd->dev, ABS_X, 0, TPD_RES_X, 0, 0);
-	input_set_abs_params(tpd->dev, ABS_Y, 0, TPD_RES_Y, 0, 0);
-	input_abs_set_res(tpd->dev, ABS_X, TPD_RES_X);
-	input_abs_set_res(tpd->dev, ABS_Y, TPD_RES_Y);
+	input_set_abs_params(tpd->dev, ABS_X, 0, TPD_ABS_MAX_X, 0, 0);
+	input_set_abs_params(tpd->dev, ABS_Y, 0, TPD_ABS_MAX_Y, 0, 0);
+	input_abs_set_res(tpd->dev, ABS_X, TPD_ABS_MAX_X);
+	input_abs_set_res(tpd->dev, ABS_Y, TPD_ABS_MAX_Y);
 	input_set_abs_params(tpd->dev, ABS_PRESSURE, 0, 255, 0, 0);
 	input_set_abs_params(tpd->dev, ABS_MT_TRACKING_ID, 0, 10, 0, 0);
 
