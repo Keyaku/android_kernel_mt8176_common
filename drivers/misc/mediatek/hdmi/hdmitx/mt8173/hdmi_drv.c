@@ -2026,7 +2026,12 @@ void hdmi_irq_impl(void)
 		bReadGRLInt();
 		bClearGRLInt(0xff);
 		hdmi_hotplugstate = HDMI_STATE_HOT_PLUG_IN_ONLY;
-		vSetSharedInfo(SI_HDMI_RECEIVER_STATUS, HDMI_STATE_HOT_PLUG_IN_ONLY);
+		/* This field holds HDMI_PLUG_*, not HDMI_CTRL_STATE_T. Writing
+		 * HDMI_STATE_HOT_PLUG_IN_ONLY (3) stored HDMI_PLUG_IN_EDID, so
+		 * every consumer comparing against HDMI_PLUG_IN_ONLY misread a
+		 * plug-in-only sink.
+		 */
+		vSetSharedInfo(SI_HDMI_RECEIVER_STATUS, HDMI_PLUG_IN_ONLY);
 		vPlugDetectService(HDMI_STATE_HOT_PLUG_IN_ONLY);
 		HDMI_PLUG_LOG("hdmi plug in only return\n");
 	} else if ((hdmi_hotplugstate == HDMI_STATE_HOT_PLUG_OUT)

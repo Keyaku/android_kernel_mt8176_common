@@ -933,6 +933,33 @@ void hdmi_state_callback(enum HDMI_STATE state)
 			break;
 		}
 
+	case HDMI_STATE_PLUGIN_ONLY:
+		{
+			/* HPD asserted without PORD: a DVI adapter, a dummy plug, or
+			 * a sink that is switched off. Nothing handled this state, so
+			 * the switch node was never set and no uevent was emitted --
+			 * such a sink could never register a display.
+			 *
+			 * The video path is usable, so report ACTIVE on the video
+			 * switch. The audio switch is deliberately left alone: no
+			 * sink power means no audio sink to route to.
+			 */
+			if (IS_HDMI_ON()) {
+				HDMI_LOG("[hdmi]%s, plugin only, already on(%d) !\n", __func__,
+					 atomic_read(&(p->state)));
+				break;
+			}
+
+			hdmi_drv->get_params(hdmi_params);
+			hdmi_resume();
+
+			if (atomic_read(&p->state) > HDMI_POWER_STATE_OFF)
+				switch_set_state(&hdmi_switch_data, HDMI_STATE_ACTIVE);
+
+			hdmi_reschange = HDMI_VIDEO_RESOLUTION_NUM;
+			break;
+		}
+
 	case HDMI_STATE_NO_DEVICE_IN_BOOT:
 		{
 			HDMI_LOG("[hdmi]uevent in boot:HDMI_STATE_NO_DEVICE\n");
