@@ -960,10 +960,24 @@ void hdmi_state_callback(enum HDMI_STATE state)
 			break;
 		}
 
+	/* The two *_IN_BOOT states report a sink that appeared while the display
+	 * pipeline is not in a position to bring itself up: the transmitter is off,
+	 * and hdmi_resume() below returns early from HDMI_POWER_STATE_OFF because it
+	 * only ever resumes from standby. Stock handled that by announcing audio and
+	 * nothing else, which is why a cable plugged into an idle device could be
+	 * detected and still never register a display.
+	 *
+	 * Set the video switch too. Nothing in the framework consumes it -- only
+	 * WiredAccessoryManager watches hdmi_audio, and it watches it for audio --
+	 * so this switch is in practice the uevent channel xdplus_hdmid listens on.
+	 * Raising it is what lets userspace run the bring-up that powers the
+	 * transmitter, after which the normal (non-boot) branches take over.
+	 */
 	case HDMI_STATE_NO_DEVICE_IN_BOOT:
 		{
 			HDMI_LOG("[hdmi]uevent in boot:HDMI_STATE_NO_DEVICE\n");
 			switch_set_state(&hdmi_audio_switch_data, HDMI_STATE_NO_DEVICE);
+			switch_set_state(&hdmi_switch_data, HDMI_STATE_NO_DEVICE);
 			break;
 		}
 
@@ -971,6 +985,7 @@ void hdmi_state_callback(enum HDMI_STATE state)
 		{
 			HDMI_LOG("[hdmi]uevent in boot:HDMI_STATE_ACTIVE_IN_BOOT\n");
 			switch_set_state(&hdmi_audio_switch_data, HDMI_STATE_ACTIVE);
+			switch_set_state(&hdmi_switch_data, HDMI_STATE_ACTIVE);
 			break;
 		}
 
