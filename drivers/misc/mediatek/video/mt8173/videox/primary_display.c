@@ -4103,19 +4103,38 @@ static int _config_ovl_input(primary_disp_input_config *input,
 	 */
 	if (gEnableRotFreezeLog) {
 		static unsigned int rf_cnt;
-		static unsigned long rf_last_addr;
+		static unsigned long rf_last_sum;
 		static int rf_was_changed = -1;
-		unsigned long rf_addr = data_config->ovl_config[0].addr;
-		int rf_changed = (rf_addr != rf_last_addr);
+		unsigned long rf_sum = 0;
+		int rf_changed;
 
-		if (rf_changed != rf_was_changed || (rf_cnt % 60) == 0)
-			DISPMSG("[ROTFREEZE] n=%u l0_addr=0x%lx changed=%d ovl_dirty=%d dirty0=%d en0=%d smode=%d passed=%s used=config\n",
-				rf_cnt, rf_addr, rf_changed, data_config->ovl_dirty,
-				input[0].dirty, input[0].layer_en, pgc->session_mode,
+		/* Digest every layer, not just layer 0: "the address stopped moving"
+		 * only means the source stalled if no other layer took over the
+		 * content, which is exactly what a rotation could do.
+		 */
+		for (i = 0; i < HW_OVERLAY_COUNT; i++)
+			rf_sum += data_config->ovl_config[i].addr +
+				  data_config->ovl_config[i].layer_en * 7919UL;
+		rf_changed = (rf_sum != rf_last_sum);
+
+		if (rf_changed != rf_was_changed || (rf_cnt % 60) == 0) {
+			DISPMSG("[ROTFREEZE] n=%u changed=%d ovl_dirty=%d nlayer=%d smode=%d passed=%s used=config\n",
+				rf_cnt, rf_changed, data_config->ovl_dirty,
+				session_input->config_layer_num, pgc->session_mode,
 				(cmdq_handle == pgc->cmdq_handle_config) ? "config" : "ovl1to2");
+			for (i = 0; i < HW_OVERLAY_COUNT; i++)
+				DISPMSG("[ROTFREEZE]   L%d en=%d dirty=%d addr=0x%lx fmt=%d src=%ux%u@%u,%u pitch=%u dst=%ux%u@%u,%u\n",
+					i, data_config->ovl_config[i].layer_en, input[i].dirty,
+					data_config->ovl_config[i].addr, data_config->ovl_config[i].fmt,
+					data_config->ovl_config[i].src_w, data_config->ovl_config[i].src_h,
+					data_config->ovl_config[i].src_x, data_config->ovl_config[i].src_y,
+					data_config->ovl_config[i].src_pitch,
+					data_config->ovl_config[i].dst_w, data_config->ovl_config[i].dst_h,
+					data_config->ovl_config[i].dst_x, data_config->ovl_config[i].dst_y);
+		}
 
 		rf_was_changed = rf_changed;
-		rf_last_addr = rf_addr;
+		rf_last_sum = rf_sum;
 		rf_cnt++;
 	}
 
