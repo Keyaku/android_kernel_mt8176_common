@@ -1298,20 +1298,34 @@ void hdmi_internal_power_off(void)
 	if (hdmi_powerenable == 0)
 		return;
 
-	hdmi_hotplugstate = HDMI_STATE_HOT_PLUG_OUT;
 	hdcp2_version_flag = FALSE;
 
 	hdmi_tmds_start_jiffies = 0;
 	hdmi_hpd_low_pending = false;
 	hdmi_plugin_ready = false;
 
-	HDMI_DisableIrq();
+	/* Hot-plug detection is deliberately left armed across a teardown.
+	 *
+	 * HDMI_DisableIrq() used to run here. Despite the name it does not touch
+	 * the HDMI block at all: vWriteHdmiIntMask()'s GRL write is commented out
+	 * upstream, so its only effect is to clear HDMI_HTPLG_INT_EN and
+	 * HDMI_PORD_INT_EN in the CEC block's RX_EVENT -- i.e. it turns off plug
+	 * detection itself. Nothing re-arms those bits except
+	 * hdmi_internal_power_on(), which is exactly the thing a plug is supposed
+	 * to trigger, so after a userspace teardown a cable event could never be
+	 * reported again. Measured that way: hdmi_irq_impl() was never entered at
+	 * all, with HPD readable and high the whole time.
+	 *
+	 * Leaving it armed is safe because events in this state are handled by the
+	 * transmitter-off branch of hdmi_irq_impl(), which reads only the CEC
+	 * block. The interrupt is armed at reset, which is why a plug at boot --
+	 * where HDMI_EnableIrq() has never run -- is detected.
+	 */
 
 	_stAvdAVInfo.fgHdmiTmdsEnable = 0;
 	av_hdmiset(HDMI_SET_TURN_OFF_TMDS, &_stAvdAVInfo, 1);
 
 	SwitchHDMIVersion(FALSE);
-	vSetSharedInfo(SI_HDMI_RECEIVER_STATUS, HDMI_PLUG_OUT);
 
 	if (hdmi_clockenable == 1) {
 		HDMI_PLUG_LOG("hdmi irq for clock:hdmi plug out\n");
@@ -1329,6 +1343,29 @@ void hdmi_internal_power_off(void)
 	}
 
 	hdmi_powerenable = 0;
+
+	/* Record what is actually on the connector, rather than forcing PLUG_OUT.
+	 *
+	 * With the interrupt now left armed and the cable still in, a forced
+	 * PLUG_OUT would make the next interrupt look like a fresh plug-in: the
+	 * transmitter-off branch would report ACTIVE_IN_BOOT, userspace would
+	 * bring the mirror straight back up, and the teardown would be a no-op the
+	 * user cannot escape. Seeding the real state means only a genuine
+	 * unplug/replug is reported. Read after the rail is dropped so it reflects
+	 * the state being left behind.
+	 *
+	 * port_hpd_value_bak is seeded for the same reason -- the handler wakes the
+	 * thread only on a change, and power_on() sets it to 0xff to force one.
+	 */
+	if (bCheckPordHotPlug(PORD_MODE | HOTPLUG_MODE) == TRUE) {
+		hdmi_hotplugstate = HDMI_STATE_HOT_PLUGIN_AND_POWER_ON;
+		vSetSharedInfo(SI_HDMI_RECEIVER_STATUS, HDMI_PLUG_IN_AND_SINK_POWER_ON);
+	} else {
+		hdmi_hotplugstate = HDMI_STATE_HOT_PLUG_OUT;
+		vSetSharedInfo(SI_HDMI_RECEIVER_STATUS, HDMI_PLUG_OUT);
+	}
+	port_hpd_value_bak = hdmi_get_port_hpd_value();
+
 	if (factory_boot_mode != true) {
 		if (r_hdmi_timer.function)
 			del_timer_sync(&r_hdmi_timer);
@@ -2538,12 +2575,21 @@ static int hdmi_pwrpin_show(struct seq_file *s, void *unused)
 	 * will stick. powerenable/clockenable are NOT that -- they flip when the
 	 * call returns, so they only prove the call happened.
 	 */
-	seq_printf(s, "pin=%d value=%d powerenable=%zu clockenable=%zu hotplug=%zu ready=%d\n",
+	/* hotplug= is hdmi_hotplugstate (enum HDMI_CTRL_STATE_T), NOT a raw HPD
+	 * reading -- 1 is HDMI_STATE_HOT_PLUG_OUT, 2 is HOT_PLUGIN_AND_POWER_ON.
+	 * hpd= is the raw pair from the CEC block (bit for PORD, bit for HTPLG),
+	 * and rx_event= is RX_EVENT, whose interrupt-enable bits are what actually
+	 * decides whether a plug can be reported at all. Those two make the state
+	 * left behind by a teardown readable without a physical cable event.
+	 */
+	seq_printf(s,
+		   "pin=%d value=%d powerenable=%zu clockenable=%zu hotplug=%zu ready=%d hpd=0x%02x rx_event=0x%08x\n",
 		   hdmi_power_control_pin, gpio_get_value(hdmi_power_control_pin),
 		   hdmi_powerenable, hdmi_clockenable, hdmi_hotplugstate,
 		   (hdmi_powerenable == 1) && (hdmi_clockenable == 1)
 		   && (hdmi_hotplugstate == HDMI_STATE_HOT_PLUGIN_AND_POWER_ON)
-		   && hdmi_plugin_ready);
+		   && hdmi_plugin_ready,
+		   hdmi_get_port_hpd_value(), hdmi_cec_read(RX_EVENT));
 	return 0;
 }
 
