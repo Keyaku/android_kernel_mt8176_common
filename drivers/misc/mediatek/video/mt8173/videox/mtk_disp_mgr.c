@@ -1442,6 +1442,31 @@ static int set_primary_buffer(disp_session_input_config session_input)
 				session_input.config[i].layer_enable = 0;
 				/* disp_input_config *input = &session_input.config[i]; */
 			}
+
+			/* Rotation-stall probe: the composer submits a fresh buffer index
+			 * every frame while the address handed down stops advancing. The
+			 * question this answers is which of the two sources of that address
+			 * is stale — the composer's own src_phy_addr, or our per-layer
+			 * buffer table. Query the table unconditionally so both can be
+			 * compared on the same frame; the query is a list walk under the
+			 * layer lock and only runs while the flag is armed.
+			 */
+			if (gEnableRotFreezeLog && session_input.config[i].layer_enable) {
+				static unsigned int rfp_cnt;
+				unsigned int probe_mva = 0, probe_size = 0;
+
+				disp_sync_query_buf_info(session_id, layer_id,
+							 (unsigned int)session_input.config[i].next_buff_idx,
+							 &probe_mva, &probe_size);
+
+				if ((rfp_cnt % 60) == 0)
+					DISPMSG("[ROTFREEZE] setprim L%d bidx=%u phy=0x%lx used=0x%08x tbl=0x%08x tblsz=%u\n",
+						layer_id,
+						session_input.config[i].next_buff_idx,
+						(unsigned long)session_input.config[i].src_phy_addr,
+						dst_mva, probe_mva, probe_size);
+				rfp_cnt++;
+			}
 			/*DISPPR_FENCE
 			   ("S+/L%d/e%d/id%d/%dx%d(%d,%d)(%d,%d)/%s/%d/0x%lx/mva0x%08x\n",
 			   session_input.config[i].layer_id,
