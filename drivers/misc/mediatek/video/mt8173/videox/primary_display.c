@@ -3836,6 +3836,13 @@ int primary_display_trigger(int blocking, void *callback, unsigned int userdata)
 				       (fence_release_callback) _ovl_fence_release_callback,
 				       DISP_SESSION_DECOUPLE_MODE);
 	} else if (pgc->session_mode == DISP_SESSION_DECOUPLE_MIRROR_MODE) {
+		static unsigned int rf_trig;
+
+		if (gEnableRotFreezeLog && (rf_trig % 60) == 0)
+			DISPMSG("[ROTFREEZE] trigger n=%u need_out=%d\n",
+				rf_trig, pgc->need_trigger_dcMirror_out);
+		rf_trig++;
+
 		if (pgc->need_trigger_dcMirror_out == 0) {
 			DISPPR_ERROR("There is no output config when decouple mirror!!\n");
 		} else {
@@ -4089,6 +4096,28 @@ static int _config_ovl_input(primary_disp_input_config *input,
 #endif
 	if (_should_wait_path_idle())
 		dpmgr_wait_event_timeout(handle, DISP_PATH_EVENT_FRAME_DONE, HZ * 1);
+
+	/* The event worth a print is the transition into or out of a stall, not
+	 * each frame either side of it: this runs at 60/s, so anything printed
+	 * per-frame drowns the ring buffer. A 1/s heartbeat carries the rest.
+	 */
+	if (gEnableRotFreezeLog) {
+		static unsigned int rf_cnt;
+		static unsigned long rf_last_addr;
+		static int rf_was_changed = -1;
+		unsigned long rf_addr = data_config->ovl_config[0].addr;
+		int rf_changed = (rf_addr != rf_last_addr);
+
+		if (rf_changed != rf_was_changed || (rf_cnt % 60) == 0)
+			DISPMSG("[ROTFREEZE] n=%u l0_addr=0x%lx changed=%d ovl_dirty=%d dirty0=%d en0=%d smode=%d passed=%s used=config\n",
+				rf_cnt, rf_addr, rf_changed, data_config->ovl_dirty,
+				input[0].dirty, input[0].layer_en, pgc->session_mode,
+				(cmdq_handle == pgc->cmdq_handle_config) ? "config" : "ovl1to2");
+
+		rf_was_changed = rf_changed;
+		rf_last_addr = rf_addr;
+		rf_cnt++;
+	}
 
 	ret = dpmgr_path_config(handle, data_config,
 				primary_display_cmdq_enabled() ? pgc->cmdq_handle_config : NULL);

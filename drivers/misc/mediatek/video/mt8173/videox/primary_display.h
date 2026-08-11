@@ -275,6 +275,14 @@ extern void _cmdq_insert_wait_frame_done_token_mira(void *handle);	/* svp */
 
 extern unsigned int gEnableOVLStatusCheck;
 extern int dfo_query(const char *s, unsigned long *v);
+
+/* Diagnostic for the decouple-mirror rotation stall: when non-zero, the OVL
+ * input config path logs the incoming layer-0 address whenever it STOPS
+ * changing, plus a 1/s heartbeat, and the decouple-mirror trigger logs whether
+ * an output config was queued. Off by default; the config path runs at 60/s.
+ * Armed with "echo rotfreeze:on > /d/dispsys".
+ */
+extern unsigned int gEnableRotFreezeLog;
 void disp_clear_current_fb_buffer(void);
 
 #endif
