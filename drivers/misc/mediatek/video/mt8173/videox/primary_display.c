@@ -4123,8 +4123,9 @@ static int _config_ovl_input(primary_disp_input_config *input,
 				session_input->config_layer_num, pgc->session_mode,
 				(cmdq_handle == pgc->cmdq_handle_config) ? "config" : "ovl1to2");
 			for (i = 0; i < HW_OVERLAY_COUNT; i++)
-				DISPMSG("[ROTFREEZE]   L%d en=%d dirty=%d addr=0x%lx fmt=%d src=%ux%u@%u,%u pitch=%u dst=%ux%u@%u,%u\n",
+				DISPMSG("[ROTFREEZE]   L%d en=%d dirty=%d bidx=%u addr=0x%lx fmt=%d src=%ux%u@%u,%u pitch=%u dst=%ux%u@%u,%u\n",
 					i, data_config->ovl_config[i].layer_en, input[i].dirty,
+					input[i].buff_idx,
 					data_config->ovl_config[i].addr, data_config->ovl_config[i].fmt,
 					data_config->ovl_config[i].src_w, data_config->ovl_config[i].src_h,
 					data_config->ovl_config[i].src_x, data_config->ovl_config[i].src_y,
