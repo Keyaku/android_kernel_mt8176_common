@@ -1215,10 +1215,8 @@ int hdmi_internal_power_on(void)
 	hdmi_hpd_low_pending = false;
 	hdmi_plugin_ready = false;
 
-	/* The CEC clock is enabled once in hdmi_internal_probe() and held for the
-	 * lifetime of the driver, because hot-plug detect lives in that block and
-	 * has to keep working while the transmitter is off. Enabling it again here
-	 * would only unbalance the refcount against a release that never comes.
+	/* CEC clock is enabled once in hdmi_internal_probe() and held for the
+	 * driver's lifetime; re-enabling here would unbalance the refcount.
 	 */
 
 	/* hdmi_clock_enable(true); */
@@ -1304,22 +1302,9 @@ void hdmi_internal_power_off(void)
 	hdmi_hpd_low_pending = false;
 	hdmi_plugin_ready = false;
 
-	/* Hot-plug detection is deliberately left armed across a teardown.
-	 *
-	 * HDMI_DisableIrq() used to run here. Despite the name it does not touch
-	 * the HDMI block at all: vWriteHdmiIntMask()'s GRL write is commented out
-	 * upstream, so its only effect is to clear HDMI_HTPLG_INT_EN and
-	 * HDMI_PORD_INT_EN in the CEC block's RX_EVENT -- i.e. it turns off plug
-	 * detection itself. Nothing re-arms those bits except
-	 * hdmi_internal_power_on(), which is exactly the thing a plug is supposed
-	 * to trigger, so after a userspace teardown a cable event could never be
-	 * reported again. Measured that way: hdmi_irq_impl() was never entered at
-	 * all, with HPD readable and high the whole time.
-	 *
-	 * Leaving it armed is safe because events in this state are handled by the
-	 * transmitter-off branch of hdmi_irq_impl(), which reads only the CEC
-	 * block. The interrupt is armed at reset, which is why a plug at boot --
-	 * where HDMI_EnableIrq() has never run -- is detected.
+	/* No HDMI_DisableIrq() here: it clears HDMI_HTPLG_INT_EN/HDMI_PORD_INT_EN
+	 * in the CEC block, i.e. disarms plug detection, and only
+	 * hdmi_internal_power_on() re-arms them.
 	 */
 
 	_stAvdAVInfo.fgHdmiTmdsEnable = 0;
@@ -1344,18 +1329,9 @@ void hdmi_internal_power_off(void)
 
 	hdmi_powerenable = 0;
 
-	/* Record what is actually on the connector, rather than forcing PLUG_OUT.
-	 *
-	 * With the interrupt now left armed and the cable still in, a forced
-	 * PLUG_OUT would make the next interrupt look like a fresh plug-in: the
-	 * transmitter-off branch would report ACTIVE_IN_BOOT, userspace would
-	 * bring the mirror straight back up, and the teardown would be a no-op the
-	 * user cannot escape. Seeding the real state means only a genuine
-	 * unplug/replug is reported. Read after the rail is dropped so it reflects
-	 * the state being left behind.
-	 *
-	 * port_hpd_value_bak is seeded for the same reason -- the handler wakes the
-	 * thread only on a change, and power_on() sets it to 0xff to force one.
+	/* Seed the state from the connector instead of forcing PLUG_OUT: with the
+	 * interrupt left armed and the cable still in, PLUG_OUT would read as a
+	 * fresh plug-in and bring the mirror straight back up.
 	 */
 	if (bCheckPordHotPlug(PORD_MODE | HOTPLUG_MODE) == TRUE) {
 		hdmi_hotplugstate = HDMI_STATE_HOT_PLUGIN_AND_POWER_ON;
@@ -2064,14 +2040,8 @@ void hdmi_irq_impl(void)
 	}
 
 	if (hdmi_is_boot_time == 1) {
-		/* hdmi_is_boot_time is only cleared by hdmi_internal_power_on(),
-		 * hdmi_internal_power_off() and cec_timer_wakeup(), all of which need
-		 * userspace to have powered the transmitter. On a boot where HDMI is
-		 * never enabled the flag therefore stays set for the life of the boot,
-		 * and every hot-plug is handled here rather than by the branches below.
-		 * That makes this the *only* path a plug into an idle device can take,
-		 * so it has to be correct on its own rather than merely good enough for
-		 * the first second after probe.
+		/* On a boot where HDMI is never enabled this flag stays set, so this
+		 * is the only path a plug into an idle device can take.
 		 */
 		unsigned char sink_present =
 			(bCheckPordHotPlug(PORD_MODE | HOTPLUG_MODE) == TRUE);
@@ -2110,23 +2080,9 @@ void hdmi_irq_impl(void)
 		 * NO_DEVICE_IN_BOOT with the cable untouched.
 		 */
 	} else if (hdmi_powerenable != 1) {
-		/* Transmitter off, and not the boot-time case above -- this is what a
-		 * plug or unplug after a teardown looks like. Every branch below reads
-		 * the HDMI block (HDCP status, GRL interrupts, DDC) and would fault
-		 * with the block unpowered, and they are all gated on hdmi_powerenable
-		 * for exactly that reason, so a plug in this state used to be seen and
-		 * then dropped on the floor.
-		 *
-		 * HPD itself is readable, because it comes from the CEC block, which is
-		 * clocked from probe. So report the transition and leave the hardware
-		 * alone. ACTIVE_IN_BOOT is the right state to report: it means "a sink
-		 * is there and we cannot bring it up ourselves", which is precisely the
-		 * situation, and it moves the switch userspace watches without trying
-		 * to resume a pipeline that is powered off.
-		 *
-		 * Once userspace powers the transmitter, hdmi_internal_power_on()
-		 * resets hdmi_hotplugstate, so the full branches below re-run and do
-		 * the EDID and HDCP work that was skipped here.
+		/* Plug or unplug after a teardown. HPD is readable (CEC block) but
+		 * every branch below reads the unpowered HDMI block and would fault,
+		 * so report the transition and touch no hardware.
 		 */
 		unsigned char sink_present =
 			(bCheckPordHotPlug(PORD_MODE | HOTPLUG_MODE) == TRUE);
@@ -2459,22 +2415,10 @@ int hdmi_internal_probe(struct platform_device *pdev, unsigned long u8Res)
 	print_clock_reg();
 	udelay(2);
 
-	/* The CEC block carries hot-plug detect: IS_HDMI_HTPLG()/IS_HDMI_PORD()
-	 * read RX_EVENT out of the CEC register file, and RX_GEN_WD's
-	 * HDMI_HTPLG_INT_32K_EN arms the 32k-domain plug interrupt. Both need
-	 * this clock, and so do the two calls below, which write CEC registers.
-	 *
-	 * Enable it here and never release it. Until this was done the clock was
-	 * only enabled by hdmi_internal_power_on(), i.e. when userspace powered
-	 * the transmitter, so a cable plugged into an idle device could not be
-	 * detected: the block could neither latch HPD nor raise its interrupt,
-	 * and reading its registers unclocked hangs the bus. The probe-time
-	 * writes below were landing on an unclocked block for the same reason.
-	 *
-	 * Mainline arranges this by giving CEC its own device with only this
-	 * clock and no power domain (drivers/gpu/drm/mediatek/mtk_cec.c), which
-	 * is what lets HPD work with the display off. This tree merges CEC into
-	 * the hdmitx node, so the equivalent has to be done by hand.
+	/* Hot-plug detect lives in the CEC block, so its clock must be held for
+	 * the driver's lifetime -- reading that block unclocked hangs the bus.
+	 * Mainline gets this from a separate CEC device (mtk_cec.c); this tree
+	 * merges CEC into the hdmitx node, so do it by hand.
 	 */
 	if (hdmi_ref_clock[INFRA_SYS_CEC]) {
 		ret = clk_prepare_enable(hdmi_ref_clock[INFRA_SYS_CEC]);
@@ -2524,18 +2468,8 @@ int hdmi_internal_probe(struct platform_device *pdev, unsigned long u8Res)
 }
 
 
-/* Connector +5V rail control, independent of the transmitter.
- *
- * A sink may only assert HPD once it detects the source's +5V on pin 18, and
- * hdmi_internal_power_off() drives this pin low, so after a teardown there is
- * nothing to detect no matter what is clocked. Powering the transmitter to get
- * the rail back also starts the TX and its PLLs, which makes it impossible to
- * tell what the rail alone costs or whether it alone is enough for detection.
- *
- * This node exists to separate the two. Writing 1 raises only the rail; 0
- * lowers it. It deliberately does not change the teardown default, because the
- * standby cost of holding the rail high has not been measured against this
- * device's idle drain budget.
+/* Connector +5V rail control, independent of the transmitter: write 1 to raise
+ * only the rail, 0 to lower it. Does not change the teardown default.
  */
 static ssize_t hdmi_pwrpin_write(struct file *file, const char __user *ubuf,
 				 size_t count, loff_t *ppos)
@@ -2575,12 +2509,9 @@ static int hdmi_pwrpin_show(struct seq_file *s, void *unused)
 	 * will stick. powerenable/clockenable are NOT that -- they flip when the
 	 * call returns, so they only prove the call happened.
 	 */
-	/* hotplug= is hdmi_hotplugstate (enum HDMI_CTRL_STATE_T), NOT a raw HPD
-	 * reading -- 1 is HDMI_STATE_HOT_PLUG_OUT, 2 is HOT_PLUGIN_AND_POWER_ON.
-	 * hpd= is the raw pair from the CEC block (bit for PORD, bit for HTPLG),
-	 * and rx_event= is RX_EVENT, whose interrupt-enable bits are what actually
-	 * decides whether a plug can be reported at all. Those two make the state
-	 * left behind by a teardown readable without a physical cable event.
+	/* hotplug= is hdmi_hotplugstate (enum HDMI_CTRL_STATE_T), not a raw HPD
+	 * reading; hpd= is the raw CEC pair and rx_event= carries the plug
+	 * interrupt-enable bits.
 	 */
 	seq_printf(s,
 		   "pin=%d value=%d powerenable=%zu clockenable=%zu hotplug=%zu ready=%d hpd=0x%02x rx_event=0x%08x\n",
