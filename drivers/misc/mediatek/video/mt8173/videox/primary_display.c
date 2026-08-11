@@ -4096,24 +4096,8 @@ static int _config_ovl_input(primary_disp_input_config *input,
 	/* write fence_id/enable to DRAM using cmdq
 	 * it will be used when release fence (put these after config registers done)
 	 *
-	 * These MUST ride the same cmdq handle the caller configured the path on,
-	 * not pgc->cmdq_handle_config. In decouple and decouple-mirror mode the
-	 * caller passes cmdq_handle_ovl1to2_config, and cmdq_handle_config is
-	 * never flushed in those modes: primary_display_trigger() reaches
-	 * _cmdq_flush_config_handle() only through _trigger_display_interface(),
-	 * which is the direct-link path. Queuing the slot writes on the config
-	 * handle there stranded them, so cur_config_fence[] kept the value it had
-	 * when the mode switched, _ovl_fence_release_callback() released against
-	 * that stale index for every later frame, and the input-layer fences were
-	 * prepared but never signalled.
-	 *
-	 * The client-visible result was a mirror that looked fine on both screens
-	 * while every GPU client blocked in sync_wait inside eglMakeCurrent, the
-	 * blob logged "HW operation timeout", and the UI crawled. Measured on
-	 * hardware: primary session layer 0 ran an average fence lag of 213 with
-	 * the mirror up against 1.3 with it down, while the output/interface
-	 * timeline — whose slot writes already ride the correct handle in
-	 * _trigger_ovl_to_memory_mirror() — stayed at 0.
+	 * Must ride the caller's cmdq_handle, not pgc->cmdq_handle_config, which is
+	 * never flushed in decouple and decouple-mirror mode.
 	 */
 	for (i = 0; i < session_input->config_layer_num; i++) {
 		unsigned int last_fence, cur_fence;
