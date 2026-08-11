@@ -4139,8 +4139,11 @@ static int _config_ovl_input(primary_disp_input_config *input,
 		rf_cnt++;
 	}
 
+	/* commit on the caller's handle: cmdq_handle_config is not flushed in
+	 * decouple/mirror mode, so layer enables and geometry never land
+	 */
 	ret = dpmgr_path_config(handle, data_config,
-				primary_display_cmdq_enabled() ? pgc->cmdq_handle_config : NULL);
+				primary_display_cmdq_enabled() ? cmdq_handle : NULL);
 
 	/* write fence_id/enable to DRAM using cmdq
 	 * it will be used when release fence (put these after config registers done)
