@@ -116,6 +116,7 @@ static DBG_OPTIONS dbg_opt = { 0 };
 
 static bool enable_ovl1_to_mem = true;
 unsigned int gEnableFenceLog = 0;
+unsigned int gEnableRotFreezeLog;
 
 
 static char STR_HELP[] =
@@ -802,6 +803,14 @@ static void process_dbg_opt(const char *opt)
 		} else if (0 == strncmp(opt + 13, "off", 3)) {
 			gEnableFenceLog = 0;
 			DISPMSG("fence log disable\n");
+		}
+	} else if (0 == strncmp(opt, "rotfreeze:", 10)) {
+		if (0 == strncmp(opt + 10, "on", 2)) {
+			gEnableRotFreezeLog = 1;
+			DISPMSG("rotfreeze log enable\n");
+		} else if (0 == strncmp(opt + 10, "off", 3)) {
+			gEnableRotFreezeLog = 0;
+			DISPMSG("rotfreeze log disable\n");
 		}
 	} else {
 		DISPDBG("parse command error!\n\n%s", STR_HELP);
