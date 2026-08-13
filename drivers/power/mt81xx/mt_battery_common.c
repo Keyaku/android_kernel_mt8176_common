@@ -65,7 +65,7 @@ extern void battery_pump_express_charger_check(void);
 #define BATTERY_NOTIFY_CASE_0004_VBAT
 #define BATTERY_NOTIFY_CASE_0005_TOTAL_CHARGINGTIME
 
-//add-wujie@wisky20170830 ¸ßÎÂ»Ö¸´³äµç
+//add-wujie@wisky20170830 ï¿½ï¿½ï¿½Â»Ö¸ï¿½ï¿½ï¿½ï¿½
 typedef enum {
 	KAL_FALSE = 0,
 	KAL_TRUE  = 1,
@@ -309,6 +309,7 @@ static enum power_supply_property battery_props[] = {
 	POWER_SUPPLY_PROP_PRESENT,
 	POWER_SUPPLY_PROP_TECHNOLOGY,
 	POWER_SUPPLY_PROP_CAPACITY,
+	POWER_SUPPLY_PROP_CURRENT_NOW,
 	/* Add for Battery Service */
 	POWER_SUPPLY_PROP_VOLTAGE_NOW,
 	POWER_SUPPLY_PROP_VOLTAGE_AVG,
@@ -490,6 +491,20 @@ static int battery_get_property(struct power_supply *psy,
 		break;
 	case POWER_SUPPLY_PROP_CAPACITY:
 		val->intval = data->BAT_CAPACITY;
+		break;
+	case POWER_SUPPLY_PROP_CURRENT_NOW:
+		/*
+		 * Live current from the FGADC sense resistor.
+		 * battery_meter_get_battery_current() returns a magnitude in
+		 * 0.1 mA units; convert to the standard ÂµA.  Sign follows the
+		 * Android BATTERY_PROPERTY_CURRENT_NOW convention (positive =
+		 * charging), which is what userspace monitors (MKM etc.)
+		 * expect â€” this is the opposite of the in-kernel
+		 * negative-while-charging convention.
+		 */
+		val->intval = battery_meter_get_battery_current() * 100;
+		if (battery_meter_get_battery_current_sign() != KAL_TRUE)
+			val->intval = -val->intval;
 		break;
 	case POWER_SUPPLY_PROP_VOLTAGE_NOW:
 		val->intval = data->BAT_VOLTAGE_NOW;
@@ -2126,10 +2141,10 @@ static int mt_battery_CheckBatteryTemp(void)
 	if (BMT_status.temperature >= p_bat_charging_data->max_charge_temperature) {
 		battery_log(BAT_LOG_CRTI, "[BATTERY] Battery Over Temperature !!\n\r");
 		status = PMU_STATUS_FAIL;
-		g_overTemp = KAL_TRUE;  //add-wujie@wisky20170830 ¸ßÎÂ»Ö¸´³äµç
+		g_overTemp = KAL_TRUE;  //add-wujie@wisky20170830 ï¿½ï¿½ï¿½Â»Ö¸ï¿½ï¿½ï¿½ï¿½
 	}
 #endif
-	//add-wujie@wisky20170830 ¸ßÎÂ»Ö¸´³äµç
+	//add-wujie@wisky20170830 ï¿½ï¿½ï¿½Â»Ö¸ï¿½ï¿½ï¿½ï¿½
 	if((g_overTemp == KAL_TRUE) && (BMT_status.temperature <= RECOVERY_CHARGING_TEMPERATURE))
 	{
 	     battery_log(BAT_LOG_CRTI, "[BATTERY] recovery charging after over temperature!! \n\r");
