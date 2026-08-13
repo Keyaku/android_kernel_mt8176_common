@@ -95,3 +95,18 @@ CONFIG_EXT4_FS_ENCRYPTION=y
 # The transform was measured on the live panel, not derived — three corner taps
 # gave display X = raw Y and display Y = TPD_RES_X - raw X.
 CONFIG_TPD_LANDSCAPE_NATIVE=y
+#
+# GPU devfreq exposure (mt_gpufreq_devfreq.c): the RGX DDK drives GPU DVFS
+# through mt_gpufreq directly and nothing ever registered with the devfreq
+# framework, so /sys/class/devfreq was empty and hardware-monitor apps
+# (MKM etc.) showed GPU frequency/governor/OPP table as Unknown/N/A.
+# Baseline defconfig has no PM_DEVFREQ at all and the tree ships no
+# drivers/opp, so available_frequencies falls back to the devfreq
+# profile's freq_table (small patch in drivers/devfreq/devfreq.c).
+# Governor is "userspace" at registration — inert until userspace writes.
+# SIMPLE_ONDEMAND deliberately off: no busy/total counter exists for the
+# RGX GPU, so that governor would only spam monitor errors.
+CONFIG_PM_DEVFREQ=y
+CONFIG_DEVFREQ_GOV_PERFORMANCE=y
+CONFIG_DEVFREQ_GOV_POWERSAVE=y
+CONFIG_DEVFREQ_GOV_USERSPACE=y
