@@ -984,6 +984,15 @@ static ssize_t available_frequencies_show(struct device *d,
 	} while (1);
 	rcu_read_unlock();
 
+	/* Fall back to the profile's freq_table when no OPPs are registered */
+	if (!count && df->profile->freq_table) {
+		unsigned int i;
+
+		for (i = 0; i < df->profile->max_state; i++)
+			count += scnprintf(&buf[count], (PAGE_SIZE - count - 2),
+					   "%u ", df->profile->freq_table[i]);
+	}
+
 	/* Truncate the trailing space */
 	if (count)
 		count--;
