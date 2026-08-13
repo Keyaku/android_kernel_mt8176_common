@@ -948,6 +948,18 @@ static int cpufreq_add_dev_interface(struct cpufreq_policy *policy,
 	if (ret)
 		goto err_out_kobj_put;
 
+	/* /sys/devices/system/cpu/cpufreq/policy%u symlink, as upstream >= 4.7;
+	 * userspace tools (MKM etc.) enumerate clusters by these entries. */
+	if (cpufreq_global_kobject) {
+		char link_name[16];
+
+		snprintf(link_name, sizeof(link_name), "policy%u", policy->cpu);
+		ret = sysfs_create_link(cpufreq_global_kobject, &policy->kobj,
+					link_name);
+		if (ret)
+			goto err_out_kobj_put;
+	}
+
 	return ret;
 
 err_out_kobj_put:
@@ -1469,8 +1481,16 @@ static int __cpufreq_remove_dev_finish(struct device *dev,
 			}
 		}
 
-		if (!cpufreq_suspended)
+		if (!cpufreq_suspended) {
+			if (cpufreq_global_kobject) {
+				char link_name[16];
+
+				snprintf(link_name, sizeof(link_name), "policy%u",
+					 policy->cpu);
+				sysfs_remove_link(cpufreq_global_kobject, link_name);
+			}
 			cpufreq_policy_put_kobj(policy);
+		}
 
 		/*
 		 * Perform the ->exit() even during light-weight tear-down,
