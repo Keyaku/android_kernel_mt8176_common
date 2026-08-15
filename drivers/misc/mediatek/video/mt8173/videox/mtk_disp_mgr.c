@@ -564,6 +564,15 @@ int _ioctl_trigger_session(unsigned long arg)
 			       MMProfileFlagPulse, session_id, config.present_fence_idx);
 
 		ret = ext_disp_trigger(0, NULL, session_id);
+		if (gEnableRotFreezeLog && ret != 0) {
+			static unsigned long rf_last;
+
+			if (time_after(jiffies, rf_last + HZ)) {
+				rf_last = jiffies;
+				DISPMSG("[ROTFREEZE] exttrig failed ret=%d pf_idx=%d\n",
+					ret, config.present_fence_idx);
+			}
+		}
 
 		mutex_unlock(&disp_session_lock);
 #endif
