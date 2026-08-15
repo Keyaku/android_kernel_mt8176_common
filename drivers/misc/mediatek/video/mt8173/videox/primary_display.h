@@ -280,7 +280,7 @@ extern int dfo_query(const char *s, unsigned long *v);
  * input config path logs the incoming layer-0 address whenever it STOPS
  * changing, plus a 1/s heartbeat, and the decouple-mirror trigger logs whether
  * an output config was queued. Off by default; the config path runs at 60/s.
- * Armed with "echo rotfreeze:on > /d/dispsys".
+ * Armed with "echo rotfreeze:on > /d/mtkfb".
  */
 extern unsigned int gEnableRotFreezeLog;
 void disp_clear_current_fb_buffer(void);
