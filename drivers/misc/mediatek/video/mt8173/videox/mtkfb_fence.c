@@ -360,6 +360,7 @@ static size_t mtkfb_ion_phys_mmu_addr(struct ion_client *client, struct ion_hand
 				      unsigned int *mva)
 {
 	size_t size;
+	ion_phys_addr_t phys_addr = 0;
 
 	if (!ion_client) {
 		MTKFB_FENCE_ERR("invalid ion client!\n");
@@ -368,7 +369,11 @@ static size_t mtkfb_ion_phys_mmu_addr(struct ion_client *client, struct ion_hand
 	if (IS_ERR_OR_NULL(handle))
 		return 0;
 
-	ion_phys(client, handle, (ion_phys_addr_t *) mva, &size);
+	/* ion_phys() stores an ion_phys_addr_t (64-bit here); *mva is 32-bit,
+	 * so casting it through was an 8-byte write into a 4-byte object.
+	 */
+	ion_phys(client, handle, &phys_addr, &size);
+	*mva = (unsigned int)phys_addr;
 	MTKFB_FENCE_LOG("alloc mmu addr hnd=0x%p,mva=0x%08x\n", handle, (unsigned int)*mva);
 	return size;
 }
