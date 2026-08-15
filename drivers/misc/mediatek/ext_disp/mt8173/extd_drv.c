@@ -299,6 +299,27 @@ void hdmi_hwc_enable(int enable)
 }
 
 DEFINE_SEMAPHORE(hdmi_update_mutex);
+/* Serialises HDMI power-state transitions. Acquired with trylock only: this
+ * subsystem waits on the display path and on userspace from inside a
+ * transition, so any caller that can block here can deadlock bring-up.
+ * On contention we log and proceed, i.e. no worse than stock.
+ */
+static DEFINE_MUTEX(hdmi_state_lock);
+
+static bool hdmi_state_lock_try(const char *who)
+{
+	if (mutex_trylock(&hdmi_state_lock))
+		return true;
+
+	HDMI_ERR("[hdmi] state transition already in flight, %s proceeding unlocked\n", who);
+	return false;
+}
+
+static void hdmi_state_lock_release(bool locked)
+{
+	if (locked)
+		mutex_unlock(&hdmi_state_lock);
+}
 typedef struct {
 	bool is_reconfig_needed;	/* whether need to reset HDMI memory */
 	bool is_enabled;	/* whether HDMI is enabled or disabled by user */
@@ -1026,15 +1047,19 @@ void hdmi_cec_state_callback(enum HDMI_CEC_STATE state)
 
 /*static*/ void hdmi_power_on(void)
 {
+	bool locked = hdmi_state_lock_try(__func__);
+
 	HDMI_FUNC();
 
 	if (IS_HDMI_NOT_OFF()) {
 		HDMI_LOG("return in %d\n", __LINE__);
+		hdmi_state_lock_release(locked);
 		return;
 	}
 
 	if (down_interruptible(&hdmi_update_mutex)) {
 		DISPMSG("[hdmi][HDMI] can't get semaphore in %s()\n", __func__);
+		hdmi_state_lock_release(locked);
 		return;
 	}
 
@@ -1043,6 +1068,7 @@ void hdmi_cec_state_callback(enum HDMI_CEC_STATE state)
 	hdmi_drv->power_on();
 
 	up(&hdmi_update_mutex);
+	hdmi_state_lock_release(locked);
 
 #if !defined(CONFIG_MTK_INTERNAL_HDMI_SUPPORT)
 	if (p->is_force_disable == false) {
@@ -1067,17 +1093,23 @@ void hdmi_cec_state_callback(enum HDMI_CEC_STATE state)
 
 /*static*/ void hdmi_power_off(void)
 {
+	bool locked;
+
 	HDMI_FUNC();
 
 	switch_set_state(&hdmires_switch_data, 0);
 
+	locked = hdmi_state_lock_try(__func__);
+
 	if (IS_HDMI_OFF()) {
 		HDMI_LOG("return in %d\n", __LINE__);
+		hdmi_state_lock_release(locked);
 		return;
 	}
 
 	if (down_interruptible(&hdmi_update_mutex)) {
 		DISPMSG("[hdmi][HDMI] can't get semaphore in %s()\n", __func__);
+		hdmi_state_lock_release(locked);
 		return;
 	}
 
@@ -1087,20 +1119,25 @@ void hdmi_cec_state_callback(enum HDMI_CEC_STATE state)
 	hdmi_dpi_power_switch(false);
 	SET_HDMI_OFF();
 	up(&hdmi_update_mutex);
+	hdmi_state_lock_release(locked);
 }
 
 /*static*/ void hdmi_suspend(void)
 {
+	bool locked = hdmi_state_lock_try(__func__);
+
 	HDMI_FUNC();
+
 	if (IS_HDMI_NOT_ON()) {
 		HDMI_LOG("return in %d\n", __LINE__);
+		hdmi_state_lock_release(locked);
 		return;
 	}
 
 	if (hdmi_bufferdump_on > 0)
 		MMProfileLogEx(ddp_mmp_get_events()->Extd_State, MMProfileFlagStart, Plugout, 0);
 
-	/* unlocked on purpose: hdmi_update_mutex here deadlocks bring-up */
+	/* hdmi_state_lock, never hdmi_update_mutex: that one deadlocks bring-up */
 	hdmi_drv->suspend();
 	p->is_mhl_video_on = false;
 
@@ -1115,26 +1152,34 @@ void hdmi_cec_state_callback(enum HDMI_CEC_STATE state)
 
 	if (hdmi_bufferdump_on > 0)
 		MMProfileLogEx(ddp_mmp_get_events()->Extd_State, MMProfileFlagEnd, Plugout, 0);
+
+	hdmi_state_lock_release(locked);
 }
 
 /*static*/ void hdmi_resume(void)
 {
+	bool locked;
+
 	HDMI_LOG("p->state is %d,(0:off, 1:on, 2:standby)\n", atomic_read(&(p->state)));
+
+	locked = hdmi_state_lock_try(__func__);
 
 	if (get_boot_mode() != FACTORY_BOOT) {
 		if (IS_HDMI_NOT_STANDBY()) {
 			HDMI_ERR("return in %d\n", __LINE__);
+			hdmi_state_lock_release(locked);
 			return;
 		}
 		if (IS_HDMI_ON()) {
 			HDMI_LOG("return in %d\n", __LINE__);
+			hdmi_state_lock_release(locked);
 			return;
 		}
 	}
 	if (hdmi_bufferdump_on > 0)
 		MMProfileLogEx(ddp_mmp_get_events()->Extd_State, MMProfileFlagStart, Plugin, 0);
 
-	/* unlocked on purpose: see hdmi_suspend() */
+	/* see hdmi_suspend() */
 	hdmi_dpi_power_switch(true);
 	SET_HDMI_ON();
 	/* /ext_disp_resume(); */
@@ -1143,6 +1188,8 @@ void hdmi_cec_state_callback(enum HDMI_CEC_STATE state)
 
 	if (hdmi_bufferdump_on > 0)
 		MMProfileLogEx(ddp_mmp_get_events()->Extd_State, MMProfileFlagEnd, Plugin, 0);
+
+	hdmi_state_lock_release(locked);
 }
 
 static int hdmi_release(struct inode *inode, struct file *file)
@@ -2453,6 +2500,9 @@ static long hdmi_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 					       ResChange, arg);
 
 			/*hdmi_dpi_power_switch(false);*/
+			/* no hdmi_state_lock here: bring-up holds it while waiting
+			 * on this ioctl, so taking it deadlocks a cable-in boot
+			 */
 			if (down_interruptible(&hdmi_update_mutex)) {
 				HDMI_ERR("[HDMI] can't get semaphore in\n");
 				return -EFAULT;
