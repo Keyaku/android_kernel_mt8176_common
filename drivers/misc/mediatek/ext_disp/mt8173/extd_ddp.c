@@ -77,6 +77,9 @@
 
 unsigned int g_ext_PresentFenceIndex = 0;
 
+/* Declared in videox/primary_display.h, which this module does not include. */
+extern unsigned int gEnableRotFreezeLog;
+
 static struct mutex vsync_mtx;
 
 unsigned long framebuffer_mva;
@@ -2480,6 +2483,7 @@ done:
 int ext_disp_trigger(int blocking, void *callback, unsigned int userdata)
 {
 	int ret = 0;
+	static int rf_path;
 	/* DISPFUNC(); */
 
 	_ext_disp_path_lock();
@@ -2494,6 +2498,20 @@ int ext_disp_trigger(int blocking, void *callback, unsigned int userdata)
 	   boot_up_with_facotry_mode());
 	 */
 
+	/* Rotation-stall probe: this path runs at 60/s while mirroring, so the
+	 * per-call prints are rate-limited to one a second. Off by default.
+	 */
+	if (gEnableRotFreezeLog) {
+		static unsigned long rf_last;
+
+		if (time_after(jiffies, rf_last + HZ)) {
+			rf_last = jiffies;
+			DISPMSG("[ROTFREEZE] exttrig enter active=%d state=%d nto=%d mode=%d handle=%p ovl2mem=%p\n",
+				is_hdmi_active(), pgc->state, pgc->need_trigger_overlay,
+				pgc->mode, pgc->dpmgr_handle, pgc->ovl2mem_path_handle);
+		}
+	}
+
 	if (boot_up_with_facotry_mode()) {
 		DISPMSG("%s is_hdmi_active %d state %d dpmgr_handle 0x%p\n",
 			__func__, is_hdmi_active(), pgc->state, pgc->dpmgr_handle);
@@ -2507,6 +2525,9 @@ int ext_disp_trigger(int blocking, void *callback, unsigned int userdata)
 		return -1;
 	} else if ((is_hdmi_active() == false) || (pgc->state != EXTD_RESUME)
 		   || pgc->need_trigger_overlay < 1) {
+		if (gEnableRotFreezeLog)
+			DISPMSG("[ROTFREEZE] exttrig reject active=%d state=%d nto=%d\n",
+				is_hdmi_active(), pgc->state, pgc->need_trigger_overlay);
 		DISPMSG("trigger ext display is already slept 0x%p 0x%p\n",
 			pgc->dpmgr_handle, pgc->ovl2mem_path_handle);
 
@@ -2541,8 +2562,16 @@ int ext_disp_trigger(int blocking, void *callback, unsigned int userdata)
 	/* _ext_disp_path_lock(); */
 
 	if (_should_trigger_interface()) {
+		if (gEnableRotFreezeLog && rf_path != 1) {
+			rf_path = 1;
+			DISPMSG("[ROTFREEZE] exttrig path=display-interface\n");
+		}
 		_trigger_display_interface(blocking, _extd_cmdq_finish_callback, userdata);
 	} else {
+		if (gEnableRotFreezeLog && rf_path != 2) {
+			rf_path = 2;
+			DISPMSG("[ROTFREEZE] exttrig path=ovl-to-memory\n");
+		}
 		/* _trigger_overlay_engine(); */
 		/* _trigger_display_interface(FALSE, ovl_wdma_callback, 0); */
 		_trigger_ovl_to_memory(pgc->ovl2mem_path_handle,
