@@ -212,6 +212,7 @@ int primary_display_trigger(int blocking, void *callback, unsigned int userdata)
 int primary_display_config_output(disp_mem_output_config *output);
 int primary_display_mem_out_trigger(int blocking, void *callback, unsigned int userdata);
 int primary_display_switch_mode(int sess_mode, unsigned int session, int force);
+const char *session_mode_spy(unsigned int mode);
 int primary_display_diagnose(void);
 
 int primary_display_get_info(void *info);
