@@ -25,8 +25,6 @@
 #include <linux/platform_device.h>
 #include <linux/regulator/consumer.h>
 #include <linux/input.h>
-#include <linux/workqueue.h>
-#include <linux/kmod.h>
 #include <linux/slab.h>
 
 #include "debug.h"
@@ -131,15 +129,21 @@ unsigned long long last_primary_trigger_time = 0xffffffffffffffff;
  * Detection only. Nothing here repairs display state, and no lock taken on the
  * display path may be waited on from this code.
  */
-#define WEDGEWD_QUIET_MS	3000	/* submission silence before we look */
-#define WEDGEWD_INPUT_MS	1500	/* input newer than this ends the case */
+/*
+ * Thresholds are set by one hardware result: input alone does NOT imply a
+ * frame is owed. Android only redraws when something changes, so a touch that
+ * alters nothing legitimately produces zero submissions, and a 3 s window with
+ * "input newer than the last submission" false-fired eight times in 100 ms
+ * during ordinary handling of a healthy mirror. What a healthy display cannot
+ * do is go tens of seconds with no frame while the user keeps interacting.
+ */
+#define WEDGEWD_QUIET_MS	20000	/* submission silence before we look */
+#define WEDGEWD_INPUT_MS	5000	/* input older than this ends the case */
+#define WEDGEWD_CONSEC		3	/* qualifying 1 Hz ticks before firing */
 #define WEDGEWD_MAX_FIRE	8	/* per boot; then log once and stop */
-#define WEDGEWD_HELPER		"/data/local/tmp/xdplus_wedge_capture.sh"
 
 static atomic64_t g_last_input_ns = ATOMIC64_INIT(0);
 static atomic_t g_wedgewd_fired = ATOMIC_INIT(0);
-static atomic_t g_wedgewd_busy = ATOMIC_INIT(0);
-static struct work_struct g_wedgewd_work;
 
 static void disp_set_sodi(unsigned int enable, void *cmdq_handle);
 
@@ -2673,56 +2677,56 @@ static struct input_handler wedgewd_input_handler = {
 };
 
 /*
- * Runs on the system workqueue, never from the heartbeat's context:
- * call_usermodehelper may sleep and must not be reached with any display
- * state held.
- */
-static void wedgewd_capture_work(struct work_struct *work)
-{
-	char *argv[] = { "/system/bin/sh", WEDGEWD_HELPER, NULL };
-	static char *envp[] = {
-		"HOME=/", "PATH=/system/bin:/system/xbin:/vendor/bin", NULL
-	};
-	int ret;
-
-	ret = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_EXEC);
-	DISPMSG("[WEDGEWD] capture helper spawn ret=%d\n", ret);
-	atomic_set(&g_wedgewd_busy, 0);
-}
-
-/*
  * Called once per heartbeat tick. Returns with nothing held.
  */
 static void wedgewd_check(void)
 {
+	static unsigned long last_tick;
+	static unsigned int consec;
 	unsigned long long now, last_sub, last_in;
 	unsigned int fired;
 
 	if (!gEnableWedgeWatchdog)
 		return;
-	if (pgc->state != DISP_ALIVE)
+
+	/* The caller's loop runs per vsync, not per second. Gate to 1 Hz here
+	 * or an eight-fire budget burns in a tenth of a second.
+	 */
+	if (!time_after(jiffies, last_tick + HZ))
 		return;
-	if (pgc->session_mode != DISP_SESSION_DECOUPLE_MIRROR_MODE)
+	last_tick = jiffies;
+
+	if (pgc->state != DISP_ALIVE ||
+	    pgc->session_mode != DISP_SESSION_DECOUPLE_MIRROR_MODE) {
+		consec = 0;
 		return;
+	}
 
 	now = sched_clock();
 	last_sub = last_primary_trigger_time;
 	last_in = (unsigned long long)atomic64_read(&g_last_input_ns);
 
-	/* Nothing submitted for a while? Only interesting if the user is here. */
-	if (last_sub == 0xffffffffffffffff || now < last_sub)
+	if (last_sub == 0xffffffffffffffff || now < last_sub) {
+		consec = 0;
 		return;
-	if ((now - last_sub) < (unsigned long long)WEDGEWD_QUIET_MS * 1000000)
-		return;
+	}
 
-	/* Input must be NEWER than the last submission: the user asked for a
-	 * frame after the last one the composer produced. Input older than the
-	 * last submission is an idle screen, which is healthy.
+	/*
+	 * Three conditions, all required: submissions silent for a long time,
+	 * the user has asked for something since the last frame produced, and
+	 * the user is still here now. A static idle mirror fails the third,
+	 * an idle screen the user walked away from fails it too.
 	 */
-	if (last_in <= last_sub)
+	if ((now - last_sub) < (unsigned long long)WEDGEWD_QUIET_MS * 1000000 ||
+	    last_in <= last_sub ||
+	    (now - last_in) > (unsigned long long)WEDGEWD_INPUT_MS * 1000000) {
+		consec = 0;
 		return;
-	if ((now - last_in) > (unsigned long long)WEDGEWD_INPUT_MS * 1000000)
+	}
+
+	if (++consec < WEDGEWD_CONSEC)
 		return;
+	consec = 0;
 
 	fired = atomic_inc_return(&g_wedgewd_fired);
 	if (fired > WEDGEWD_MAX_FIRE) {
@@ -2731,18 +2735,15 @@ static void wedgewd_check(void)
 		return;
 	}
 
+	/*
+	 * Log only. Evidence collection is driven from userspace by watching
+	 * for this line: call_usermodehelper reported a successful spawn here
+	 * while the helper never ran, and a userspace watcher needs no kernel
+	 * privilege to do the same job.
+	 */
 	DISPMSG("[WEDGEWD] WEDGE SUSPECTED (%u/%u): no submission for %llums, input %llums ago, state=%d smode=%d\n",
 		fired, WEDGEWD_MAX_FIRE, (now - last_sub) / 1000000,
 		(now - last_in) / 1000000, pgc->state, pgc->session_mode);
-
-	/*
-	 * No in-kernel cmdq dump from here: cmdq_core_dump_status() and
-	 * cmdqCoreDumpCommandMem() are both static to cmdq_core.c, and the
-	 * helper reads /proc/mtk_cmdq_debug/status for the same content
-	 * without needing an exported symbol.
-	 */
-	if (atomic_cmpxchg(&g_wedgewd_busy, 0, 1) == 0)
-		schedule_work(&g_wedgewd_work);
 }
 
 static int _present_fence_release_worker_thread(void *data)
@@ -3268,7 +3269,6 @@ int primary_display_init(struct platform_device *dev, char *lcm_name, unsigned i
 	    kthread_create(_present_fence_release_worker_thread, NULL, "present_fence_worker");
 	wake_up_process(present_fence_release_worker_task);
 
-	INIT_WORK(&g_wedgewd_work, wedgewd_capture_work);
 	if (input_register_handler(&wedgewd_input_handler))
 		DISPERR("[WEDGEWD] input handler registration failed, watchdog disarmed\n");
 
