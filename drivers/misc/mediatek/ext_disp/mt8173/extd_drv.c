@@ -654,6 +654,7 @@ static int hdmi_rdma_config_kthread(void *data)
 		}
 
 		rdmafpscnt++;
+		/* racy against MTK_HDMI_VIDEO_CONFIG; locking here deadlocks HDMI */
 		hdmi_video_config(p->output_video_resolution, HDMI_VIN_FORMAT_RGB888,
 				  HDMI_VOUT_FORMAT_RGB888);
 
@@ -1099,6 +1100,7 @@ void hdmi_cec_state_callback(enum HDMI_CEC_STATE state)
 	if (hdmi_bufferdump_on > 0)
 		MMProfileLogEx(ddp_mmp_get_events()->Extd_State, MMProfileFlagStart, Plugout, 0);
 
+	/* unlocked on purpose: hdmi_update_mutex here deadlocks bring-up */
 	hdmi_drv->suspend();
 	p->is_mhl_video_on = false;
 
@@ -1132,6 +1134,7 @@ void hdmi_cec_state_callback(enum HDMI_CEC_STATE state)
 	if (hdmi_bufferdump_on > 0)
 		MMProfileLogEx(ddp_mmp_get_events()->Extd_State, MMProfileFlagStart, Plugin, 0);
 
+	/* unlocked on purpose: see hdmi_suspend() */
 	hdmi_dpi_power_switch(true);
 	SET_HDMI_ON();
 	/* /ext_disp_resume(); */
@@ -2491,9 +2494,10 @@ static long hdmi_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 				ddp_dpi_stop(DISP_MODULE_DPI0, NULL);
 #endif
 			}
-			up(&hdmi_update_mutex);
+			/* same reconfiguration as dpi_setting_res(): keep it locked */
 			hdmi_drv->tmdsonoff(0);
 			udelay(300);
+			up(&hdmi_update_mutex);
 			/* hdmi_video_config(p->output_video_resolution, HDMI_VIN_FORMAT_RGB888,
 			   HDMI_VOUT_FORMAT_RGB888); */
 
