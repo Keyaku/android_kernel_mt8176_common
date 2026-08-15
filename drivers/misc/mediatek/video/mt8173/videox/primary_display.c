@@ -2631,6 +2631,41 @@ static int _present_fence_release_worker_thread(void *data)
 		} else if ((0 == ret) && (pgc->state != DISP_SLEPT)) {
 			DISPMSG("%s wait vsync timeout\n", __func__);
 		}
+
+		/* Vsync-path heartbeat: keeps printing when userspace stops
+		 * submitting and the per-config probe goes silent.
+		 */
+		if (gEnableRotFreezeLog) {
+			static unsigned long hb_last;
+			static unsigned int hb_vsync;
+			disp_sync_info *pre_info, *out_info;
+			int pre_lag = -1, out_lag = -1, pre_pending = -1;
+
+			if (ret > 0)
+				hb_vsync++;
+
+			if (time_after(jiffies, hb_last + HZ)) {
+				hb_last = jiffies;
+				pre_info = _get_sync_info(MAKE_DISP_SESSION(DISP_SESSION_PRIMARY, 0),
+							  disp_sync_get_present_timeline_id());
+				out_info = _get_sync_info(MAKE_DISP_SESSION(DISP_SESSION_PRIMARY, 0),
+							  disp_sync_get_output_timeline_id());
+				if (pre_info) {
+					pre_lag = (int)pre_info->fence_idx -
+						  (int)pre_info->timeline->value;
+					pre_pending = (int)gPresentFenceIndex -
+						      (int)pre_info->timeline->value;
+				}
+				if (out_info)
+					out_lag = (int)out_info->fence_idx -
+						  (int)out_info->timeline->value;
+				DISPMSG("[ROTFREEZE] hb vsync=%u pre_lag=%d pre_pending=%d out_lag=%d trig_age=%llums state=%d smode=%d\n",
+					hb_vsync, pre_lag, pre_pending, out_lag,
+					(sched_clock() - last_primary_trigger_time) / 1000000,
+					pgc->state, pgc->session_mode);
+				hb_vsync = 0;
+			}
+		}
 	}
 	return 0;
 }
