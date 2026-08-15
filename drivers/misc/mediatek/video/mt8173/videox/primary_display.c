@@ -136,6 +136,11 @@ typedef struct {
 	int need_trigger_dcMirror_out;
 	DISP_PRIMARY_PATH_MODE mode;
 	int session_mode;
+	/* A mode switch requested while the path is asleep cannot run its path
+	 * surgery, so session_mode must keep describing the hardware and the
+	 * request is parked here until resume can apply it. 0 = none pending.
+	 */
+	int pending_session_mode;
 	unsigned int session_id;
 	unsigned int last_vsync_tick;
 	unsigned long framebuffer_mva;
@@ -3559,6 +3564,21 @@ int primary_display_resume(void)
 
 done:
 	_primary_path_unlock(__func__);
+
+	/* A switch requested while asleep was parked rather than stamped, because
+	 * only the awake path can do the path surgery it implies. The path is
+	 * rebuilt now, so run it for real -- switch_mode takes the lock itself.
+	 */
+	if (pgc->pending_session_mode) {
+		int pending = pgc->pending_session_mode;
+
+		pgc->pending_session_mode = 0;
+		if (pgc->state == DISP_ALIVE && pending != pgc->session_mode) {
+			DISPMSG("primary display applying deferred switch %s -> %s after resume\n",
+				session_mode_spy(pgc->session_mode), session_mode_spy(pending));
+			primary_display_switch_mode(pending, pgc->session_id, 0);
+		}
+	}
 	/* primary_display_diagnose(); */
 #ifdef CONFIG_MTK_AEE_POWERKEY_HANG_DETECT
 	aee_kernel_wdt_kick_Powkey_api("mtkfb_late_resume", WDT_SETBY_Display);
@@ -4864,15 +4884,26 @@ int primary_display_switch_mode(int sess_mode, unsigned int session, int force)
 	MMProfileLogEx(ddp_mmp_get_events()->primary_switch_mode, MMProfileFlagStart,
 		       pgc->session_mode, sess_mode);
 
-	if (pgc->session_mode == sess_mode)
-		goto done;
-
-	if (pgc->state == DISP_SLEPT) {
-		DISPMSG("primary display switch from %s to %s in suspend state!!!\n",
-			session_mode_spy(pgc->session_mode), session_mode_spy(sess_mode));
-		pgc->session_mode = sess_mode;
+	if (pgc->session_mode == sess_mode) {
+		pgc->pending_session_mode = 0;
 		goto done;
 	}
+
+	if (pgc->state == DISP_SLEPT) {
+		/* No path surgery can run here, so stamping session_mode would
+		 * leave it describing a path the hardware is not in: suspend and
+		 * resume gate every ovl2mem power/connect/start/config on it, and
+		 * the scenario the dpmgr handle was built with is only changed by
+		 * _DL_switch_to_DC_fast()/_DC_switch_to_DL_fast(). Park the
+		 * request and let resume apply it for real.
+		 */
+		DISPMSG("primary display switch from %s to %s in suspend state, deferred to resume\n",
+			session_mode_spy(pgc->session_mode), session_mode_spy(sess_mode));
+		pgc->pending_session_mode = sess_mode;
+		goto done;
+	}
+
+	pgc->pending_session_mode = 0;
 	DDPDBG("primary_display_switch_mode from DISP_IOCTL_SET_SESSION_MODE\n");
 	DDPDBG("primary display will switch from %s to %s\n", session_mode_spy(pgc->session_mode),
 	       session_mode_spy(sess_mode));
