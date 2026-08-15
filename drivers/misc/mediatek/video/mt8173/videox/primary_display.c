@@ -24,6 +24,10 @@
 #include <linux/device.h>
 #include <linux/platform_device.h>
 #include <linux/regulator/consumer.h>
+#include <linux/input.h>
+#include <linux/workqueue.h>
+#include <linux/kmod.h>
+#include <linux/slab.h>
 
 #include "debug.h"
 
@@ -112,6 +116,30 @@ static bool g_is_sec;
 static disp_mem_output_config mem_config;
 static unsigned int primary_session_id = MAKE_DISP_SESSION(DISP_SESSION_PRIMARY, 0);
 unsigned long long last_primary_trigger_time = 0xffffffffffffffff;
+
+/*
+ * Mirror-wedge watchdog.
+ *
+ * The composer can stop submitting frames entirely while every kernel object
+ * stays clean: no fence lag, no queued cmdq work, no thread in a kernel wait.
+ * Absence of submissions on its own cannot be judged, because a static
+ * screen-on mirror produces exactly the same silence. Input is the separator:
+ * events reach the kernel through the input core regardless of what the
+ * display path is doing, so "the user is interacting and nothing is being
+ * drawn" is a state a healthy display cannot occupy.
+ *
+ * Detection only. Nothing here repairs display state, and no lock taken on the
+ * display path may be waited on from this code.
+ */
+#define WEDGEWD_QUIET_MS	3000	/* submission silence before we look */
+#define WEDGEWD_INPUT_MS	1500	/* input newer than this ends the case */
+#define WEDGEWD_MAX_FIRE	8	/* per boot; then log once and stop */
+#define WEDGEWD_HELPER		"/data/local/tmp/xdplus_wedge_capture.sh"
+
+static atomic64_t g_last_input_ns = ATOMIC64_INIT(0);
+static atomic_t g_wedgewd_fired = ATOMIC_INIT(0);
+static atomic_t g_wedgewd_busy = ATOMIC_INIT(0);
+static struct work_struct g_wedgewd_work;
 
 static void disp_set_sodi(unsigned int enable, void *cmdq_handle);
 
@@ -2585,6 +2613,138 @@ static int _fence_release_worker_thread(void *data)
 
 static struct task_struct *present_fence_release_worker_task;
 
+static void wedgewd_input_event(struct input_handle *handle, unsigned int type,
+				unsigned int code, int value)
+{
+	/* Key/touch activity only; SYN and device housekeeping are not user input. */
+	if (type == EV_KEY || type == EV_ABS || type == EV_REL)
+		atomic64_set(&g_last_input_ns, sched_clock());
+}
+
+static int wedgewd_input_connect(struct input_handler *handler,
+				 struct input_dev *dev,
+				 const struct input_device_id *id)
+{
+	struct input_handle *handle;
+	int ret;
+
+	handle = kzalloc(sizeof(*handle), GFP_KERNEL);
+	if (!handle)
+		return -ENOMEM;
+
+	handle->dev = dev;
+	handle->handler = handler;
+	handle->name = "xdplus_wedgewd";
+
+	ret = input_register_handle(handle);
+	if (ret)
+		goto err_free;
+	ret = input_open_device(handle);
+	if (ret)
+		goto err_unregister;
+
+	return 0;
+
+err_unregister:
+	input_unregister_handle(handle);
+err_free:
+	kfree(handle);
+	return ret;
+}
+
+static void wedgewd_input_disconnect(struct input_handle *handle)
+{
+	input_close_device(handle);
+	input_unregister_handle(handle);
+	kfree(handle);
+}
+
+static const struct input_device_id wedgewd_input_ids[] = {
+	{ .driver_info = 1 },	/* match every input device */
+	{ },
+};
+
+static struct input_handler wedgewd_input_handler = {
+	.event		= wedgewd_input_event,
+	.connect	= wedgewd_input_connect,
+	.disconnect	= wedgewd_input_disconnect,
+	.name		= "xdplus_wedgewd",
+	.id_table	= wedgewd_input_ids,
+};
+
+/*
+ * Runs on the system workqueue, never from the heartbeat's context:
+ * call_usermodehelper may sleep and must not be reached with any display
+ * state held.
+ */
+static void wedgewd_capture_work(struct work_struct *work)
+{
+	char *argv[] = { "/system/bin/sh", WEDGEWD_HELPER, NULL };
+	static char *envp[] = {
+		"HOME=/", "PATH=/system/bin:/system/xbin:/vendor/bin", NULL
+	};
+	int ret;
+
+	ret = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_EXEC);
+	DISPMSG("[WEDGEWD] capture helper spawn ret=%d\n", ret);
+	atomic_set(&g_wedgewd_busy, 0);
+}
+
+/*
+ * Called once per heartbeat tick. Returns with nothing held.
+ */
+static void wedgewd_check(void)
+{
+	unsigned long long now, last_sub, last_in;
+	unsigned int fired;
+
+	if (!gEnableWedgeWatchdog)
+		return;
+	if (pgc->state != DISP_ALIVE)
+		return;
+	if (pgc->session_mode != DISP_SESSION_DECOUPLE_MIRROR_MODE)
+		return;
+
+	now = sched_clock();
+	last_sub = last_primary_trigger_time;
+	last_in = (unsigned long long)atomic64_read(&g_last_input_ns);
+
+	/* Nothing submitted for a while? Only interesting if the user is here. */
+	if (last_sub == 0xffffffffffffffff || now < last_sub)
+		return;
+	if ((now - last_sub) < (unsigned long long)WEDGEWD_QUIET_MS * 1000000)
+		return;
+
+	/* Input must be NEWER than the last submission: the user asked for a
+	 * frame after the last one the composer produced. Input older than the
+	 * last submission is an idle screen, which is healthy.
+	 */
+	if (last_in <= last_sub)
+		return;
+	if ((now - last_in) > (unsigned long long)WEDGEWD_INPUT_MS * 1000000)
+		return;
+
+	fired = atomic_inc_return(&g_wedgewd_fired);
+	if (fired > WEDGEWD_MAX_FIRE) {
+		if (fired == WEDGEWD_MAX_FIRE + 1)
+			DISPMSG("[WEDGEWD] fire limit reached, silent for this boot\n");
+		return;
+	}
+
+	DISPMSG("[WEDGEWD] WEDGE SUSPECTED (%u/%u): no submission for %llums, input %llums ago, state=%d smode=%d\n",
+		fired, WEDGEWD_MAX_FIRE, (now - last_sub) / 1000000,
+		(now - last_in) / 1000000, pgc->state, pgc->session_mode);
+
+	/*
+	 * No in-kernel cmdq dump from here: cmdq_core_dump_status() and
+	 * cmdqCoreDumpCommandMem() are both static to cmdq_core.c, and the
+	 * helper reads /proc/mtk_cmdq_debug/status for the same content
+	 * without needing an exported symbol.
+	 */
+	if (atomic_cmpxchg(&g_wedgewd_busy, 0, 1) == 0)
+		schedule_work(&g_wedgewd_work);
+}
+
 static int _present_fence_release_worker_thread(void *data)
 {
 	int ret = 0;
@@ -2668,6 +2828,8 @@ static int _present_fence_release_worker_thread(void *data)
 				hb_vsync = 0;
 			}
 		}
+
+		wedgewd_check();
 	}
 	return 0;
 }
@@ -3105,6 +3267,10 @@ int primary_display_init(struct platform_device *dev, char *lcm_name, unsigned i
 	present_fence_release_worker_task =
 	    kthread_create(_present_fence_release_worker_thread, NULL, "present_fence_worker");
 	wake_up_process(present_fence_release_worker_task);
+
+	INIT_WORK(&g_wedgewd_work, wedgewd_capture_work);
+	if (input_register_handler(&wedgewd_input_handler))
+		DISPERR("[WEDGEWD] input handler registration failed, watchdog disarmed\n");
 
 	if (decouple_fence_release_task == NULL) {
 		disp_register_module_irq_callback(DISP_MODULE_OVL0,
@@ -3761,6 +3927,7 @@ static int _trigger_ovl_to_memory_mirror(disp_path_handle disp_handle,
 					 fence_release_callback callback, unsigned int data)
 {
 	int layer = 0;
+	int ret;
 	unsigned int rdma_pitch_sec;
 
 	dpmgr_path_trigger(disp_handle, cmdq_handle, CMDQ_ENABLE);
@@ -3780,12 +3947,15 @@ static int _trigger_ovl_to_memory_mirror(disp_path_handle disp_handle,
 	rdma_pitch_sec = mem_config.pitch | (mem_config.security << 30);
 	cmdqRecBackupUpdateSlot(cmdq_handle, pgc->rdma_buff_info, 1, rdma_pitch_sec);
 
-	cmdqRecFlushAsyncCallback(cmdq_handle, (CmdqAsyncFlushCB) callback, data);
+	ret = cmdqRecFlushAsyncCallback(cmdq_handle, (CmdqAsyncFlushCB) callback, data);
+	if (ret < 0)
+		DISPPR_ERROR("decouple mirror flush failed, ret=%d\n", ret);
+
 	cmdqRecReset(cmdq_handle);
 	cmdqRecWait(cmdq_handle, CMDQ_EVENT_DISP_WDMA0_EOF);
 	MMProfileLogEx(ddp_mmp_get_events()->ovl_trigger, MMProfileFlagPulse, 0, data);
 
-	return 0;
+	return ret;
 }
 
 static int primary_display_remove_output(void *callback, unsigned int userdata)

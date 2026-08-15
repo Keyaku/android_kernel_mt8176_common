@@ -284,6 +284,7 @@ extern int dfo_query(const char *s, unsigned long *v);
  * Armed with "echo rotfreeze:on > /d/mtkfb".
  */
 extern unsigned int gEnableRotFreezeLog;
+extern unsigned int gEnableWedgeWatchdog;
 void disp_clear_current_fb_buffer(void);
 
 #endif
