@@ -4140,8 +4140,39 @@ static int _config_ovl_input(primary_disp_input_config *input,
 		static unsigned int rf_cnt;
 		static unsigned long rf_last_sum;
 		static int rf_was_changed = -1;
+		/* frames since the composer last named this layer in an ioctl */
+		static unsigned int rf_stale[HW_OVERLAY_COUNT];
+		static int rf_ghost_was;
 		unsigned long rf_sum = 0;
 		int rf_changed;
+		int rf_ghost = 0;
+
+		/* A layer the composer stops naming is never disabled: only
+		 * input[i].dirty entries are converted, the rest of
+		 * ovl_config[] is last-config state recommitted every frame.
+		 * So an enabled layer no ioctl has mentioned for a while is a
+		 * ghost, and whatever is behind it never reaches the screen.
+		 */
+		for (i = 0; i < HW_OVERLAY_COUNT; i++) {
+			if (input[i].dirty)
+				rf_stale[i] = 0;
+			else if (rf_stale[i] < 0xffffffffU)
+				rf_stale[i]++;
+
+			if (data_config->ovl_config[i].layer_en && rf_stale[i] >= 60)
+				rf_ghost = 1;
+		}
+
+		if (rf_ghost != rf_ghost_was) {
+			DISPMSG("[ROTFREEZE] ghost=%d nlayer=%d smode=%d stale=%u/%u/%u/%u en=%d/%d/%d/%d\n",
+				rf_ghost, session_input->config_layer_num, pgc->session_mode,
+				rf_stale[0], rf_stale[1], rf_stale[2], rf_stale[3],
+				data_config->ovl_config[0].layer_en,
+				data_config->ovl_config[1].layer_en,
+				data_config->ovl_config[2].layer_en,
+				data_config->ovl_config[3].layer_en);
+			rf_ghost_was = rf_ghost;
+		}
 
 		/* Digest every layer, not just layer 0: "the address stopped moving"
 		 * only means the source stalled if no other layer took over the
