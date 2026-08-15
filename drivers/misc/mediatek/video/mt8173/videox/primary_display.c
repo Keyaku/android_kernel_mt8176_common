@@ -136,10 +136,7 @@ typedef struct {
 	int need_trigger_dcMirror_out;
 	DISP_PRIMARY_PATH_MODE mode;
 	int session_mode;
-	/* A mode switch requested while the path is asleep cannot run its path
-	 * surgery, so session_mode must keep describing the hardware and the
-	 * request is parked here until resume can apply it. 0 = none pending.
-	 */
+	/* switch requested while asleep, applied at resume; 0 = none */
 	int pending_session_mode;
 	unsigned int session_id;
 	unsigned int last_vsync_tick;
@@ -3565,10 +3562,7 @@ int primary_display_resume(void)
 done:
 	_primary_path_unlock(__func__);
 
-	/* A switch requested while asleep was parked rather than stamped, because
-	 * only the awake path can do the path surgery it implies. The path is
-	 * rebuilt now, so run it for real -- switch_mode takes the lock itself.
-	 */
+	/* path is rebuilt now, so apply any parked switch for real */
 	if (pgc->pending_session_mode) {
 		int pending = pgc->pending_session_mode;
 
@@ -4167,11 +4161,8 @@ static int _config_ovl_input(primary_disp_input_config *input,
 		int rf_changed;
 		int rf_ghost = 0;
 
-		/* A layer the composer stops naming is never disabled: only
-		 * input[i].dirty entries are converted, the rest of
-		 * ovl_config[] is last-config state recommitted every frame.
-		 * So an enabled layer no ioctl has mentioned for a while is a
-		 * ghost, and whatever is behind it never reaches the screen.
+		/* an enabled layer no ioctl has named for a while is a ghost:
+		 * non-dirty ovl_config[] entries are recommitted every frame
 		 */
 		for (i = 0; i < HW_OVERLAY_COUNT; i++) {
 			if (input[i].dirty)
@@ -4890,12 +4881,8 @@ int primary_display_switch_mode(int sess_mode, unsigned int session, int force)
 	}
 
 	if (pgc->state == DISP_SLEPT) {
-		/* No path surgery can run here, so stamping session_mode would
-		 * leave it describing a path the hardware is not in: suspend and
-		 * resume gate every ovl2mem power/connect/start/config on it, and
-		 * the scenario the dpmgr handle was built with is only changed by
-		 * _DL_switch_to_DC_fast()/_DC_switch_to_DL_fast(). Park the
-		 * request and let resume apply it for real.
+		/* stamping it here would leave session_mode describing a path
+		 * the hardware is not in; suspend/resume gate ovl2mem on it
 		 */
 		DISPMSG("primary display switch from %s to %s in suspend state, deferred to resume\n",
 			session_mode_spy(pgc->session_mode), session_mode_spy(sess_mode));
