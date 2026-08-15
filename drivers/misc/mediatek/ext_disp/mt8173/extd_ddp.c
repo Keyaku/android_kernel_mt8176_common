@@ -1454,7 +1454,7 @@ static int ext_disp_present_fence_release_worker_kthread(void *data)
 						}
 						xdplus_stall_rounds = 0;
 					}
-				} else {
+				} else if (lag <= 0) {
 					xdplus_stall_rounds = 0;
 				}
 			}
