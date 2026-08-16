@@ -21,6 +21,14 @@
 #include <linux/spinlock.h>
 #include <sound/soc.h>
 
+/* drivers/misc/mediatek/ext_disp/mt8173/extd_kernel_drv.h — tells the HDMI
+ * transmitter which sample rate the AFE is about to feed it. The audio HAL
+ * never issues MTK_HDMI_AUDIO_SETTING on this platform, so without this the
+ * transmitter keeps whatever rate it was last configured with and the sink
+ * decodes the stream at the wrong one.
+ */
+extern int hdmi_audio_config(int samplerate);
+
 enum {
 	HDMI_LOOPBACK_NONE = 0,
 	HDMI_LOOPBACK_SDATA0_TO_DL1,
@@ -251,6 +259,9 @@ static int mt_pcm_hdmi_prepare(struct snd_pcm_substream *substream)
 
 		priv->is_apll_related_clks_on = true;
 	}
+
+	if (turn_on_clk)
+		hdmi_audio_config(runtime->rate);
 
 	if (runtime->rate > 48000 && !priv->enable_bus_clk_boost) {
 		mt_afe_bus_clk_boost();

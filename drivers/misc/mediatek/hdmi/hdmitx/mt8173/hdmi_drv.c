@@ -799,6 +799,22 @@ static void vInitAvInfoVar(void)
 	_stAvdAVInfo.ui1_aud_out_ch_number = 2;
 	_stAvdAVInfo.e_hdmi_fs = HDMI_FS_44K;
 
+	/* The audio HAL never issues MTK_HDMI_AUDIO_SETTING on this platform,
+	 * so these fields would otherwise keep their zero values, which do not
+	 * describe what the AFE actually emits: HDMI_RJT_24BIT samples an
+	 * MSB-aligned I2S stream right-justified, AVD_BITS_NONE is not LPCM,
+	 * AUD_INPUT_1_0 is mono and IEC_48K contradicts e_hdmi_fs above. The
+	 * result is full-scale noise on the sink regardless of stream level.
+	 * mt_afe_set_hdmi_tdm1_config() sets I2S mode, MSB-aligned, 32-bit
+	 * slots carrying 16-bit samples.
+	 */
+	_stAvdAVInfo.e_hdmi_aud_in = SV_I2S;
+	_stAvdAVInfo.e_iec_frame = IEC_44K;
+	_stAvdAVInfo.e_aud_code = AVD_LPCM;
+	_stAvdAVInfo.u1Aud_Input_Chan_Cnt = AUD_INPUT_2_0;
+	_stAvdAVInfo.e_I2sFmt = HDMI_I2S_16BIT;
+	_stAvdAVInfo.u1HdmiI2sMclk = MCLK_128FS;
+
 	_stAvdAVInfo.bhdmiRChstatus[0] = 0x00;
 	_stAvdAVInfo.bhdmiRChstatus[1] = 0x00;
 	_stAvdAVInfo.bhdmiRChstatus[2] = 0x02;
@@ -1154,9 +1170,44 @@ int hdmi2_tmdsonoff(unsigned char u1ionoff)
 
 static int hdmi_internal_audio_config(enum HDMI_AUDIO_FORMAT aformat)
 {
+	HDMITX_AUDIO_PARA audio_para;
+
 	HDMI_DRV_FUNC();
 
-	return 0;
+	/* Upstream left this empty, so a sample-rate change never reached the
+	 * transmitter and the rate baked in by vInitAvInfoVar() was the only
+	 * one that played correctly. Everything except the rate is fixed by
+	 * what the AFE emits (see mt_afe_set_hdmi_tdm1_config): I2S mode,
+	 * MSB-aligned, 16-bit LPCM stereo.
+	 */
+	memset(&audio_para, 0, sizeof(audio_para));
+	audio_para.e_hdmi_aud_in = SV_I2S;
+	audio_para.e_aud_code = AVD_LPCM;
+	audio_para.u1Aud_Input_Chan_Cnt = AUD_INPUT_2_0;
+	audio_para.e_I2sFmt = HDMI_I2S_16BIT;
+	audio_para.u1HdmiI2sMclk = MCLK_128FS;
+	audio_para.bhdmi_LCh_status[2] = 0x02;
+	audio_para.bhdmi_RCh_status[2] = 0x02;
+
+	switch (aformat) {
+	case HDMI_AUDIO_PCM_16bit_32000:
+		audio_para.e_hdmi_fs = HDMI_FS_32K;
+		audio_para.e_iec_frame = IEC_32K;
+		break;
+	case HDMI_AUDIO_PCM_16bit_44100:
+		audio_para.e_hdmi_fs = HDMI_FS_44K;
+		audio_para.e_iec_frame = IEC_44K;
+		break;
+	case HDMI_AUDIO_PCM_16bit_48000:
+		audio_para.e_hdmi_fs = HDMI_FS_48K;
+		audio_para.e_iec_frame = IEC_48K;
+		break;
+	default:
+		HDMI_DRV_LOG("unsupported audio format %d\n", aformat);
+		return -EINVAL;
+	}
+
+	return hdmi_audiosetting(&audio_para);
 }
 
 /*----------------------------------------------------------------------------*/
