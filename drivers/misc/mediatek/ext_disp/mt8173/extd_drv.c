@@ -876,6 +876,7 @@ int hdmi_audio_config(int samplerate)
 
 	return 0;
 }
+EXPORT_SYMBOL(hdmi_audio_config);
 
 /* No one will use this function */
 /*static*/ int hdmi_video_enable(bool enable)
