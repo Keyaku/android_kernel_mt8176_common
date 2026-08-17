@@ -104,8 +104,10 @@ static __u32	audit_nlk_portid;
 static u32	audit_rate_limit;
 
 /* Number of outstanding audit_buffers allowed.
- * When set to zero, this means unlimited. */
-static u32	audit_backlog_limit = 64;
+ * When set to zero, this means unlimited. Raised from 64: the boot burst
+ * overruns that, audit_lost climbs into the millions and denials vanish.
+ */
+static u32	audit_backlog_limit = 1024;
 #define AUDIT_BACKLOG_WAIT_TIME (60 * HZ)
 static u32	audit_backlog_wait_time = AUDIT_BACKLOG_WAIT_TIME;
 static u32	audit_backlog_wait_overflow = 0;
