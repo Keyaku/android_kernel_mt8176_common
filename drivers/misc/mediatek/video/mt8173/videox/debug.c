@@ -117,7 +117,6 @@ static DBG_OPTIONS dbg_opt = { 0 };
 static bool enable_ovl1_to_mem = true;
 unsigned int gEnableFenceLog = 0;
 unsigned int gEnableRotFreezeLog;
-unsigned int gEnableWedgeWatchdog;
 
 
 static char STR_HELP[] =
@@ -804,14 +803,6 @@ static void process_dbg_opt(const char *opt)
 		} else if (0 == strncmp(opt + 13, "off", 3)) {
 			gEnableFenceLog = 0;
 			DISPMSG("fence log disable\n");
-		}
-	} else if (0 == strncmp(opt, "wedgewd:", 8)) {
-		if (0 == strncmp(opt + 8, "on", 2)) {
-			gEnableWedgeWatchdog = 1;
-			DISPMSG("wedge watchdog enable\n");
-		} else if (0 == strncmp(opt + 8, "off", 3)) {
-			gEnableWedgeWatchdog = 0;
-			DISPMSG("wedge watchdog disable\n");
 		}
 	} else if (0 == strncmp(opt, "rotfreeze:", 10)) {
 		if (0 == strncmp(opt + 10, "on", 2)) {

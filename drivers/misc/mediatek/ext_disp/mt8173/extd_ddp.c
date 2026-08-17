@@ -1434,9 +1434,9 @@ static int ext_disp_present_fence_release_worker_kthread(void *data)
 			 * rather than acting on the first sighting: this worker wakes on ext
 			 * vsync or every HZ/25, so 4 rounds is ~64-160 ms.
 			 *
-			 * Signalling a frame that never scanned out breaks the "was presented"
-			 * promise, which is the same trade the primary vsync bound makes
-			 * and is strictly better than a permanent stall.
+			 * Detection only: it has never fired on this device, so the
+			 * force-signal it used to perform traded a broken "was presented"
+			 * promise against a stall that does not occur here.
 			 */
 			{
 				static unsigned int xdplus_stall_rounds;
@@ -1447,10 +1447,9 @@ static int ext_disp_present_fence_release_worker_kthread(void *data)
 				if (lag > 0 && is_hdmi_active()) {
 					xdplus_stall_rounds++;
 					if (xdplus_stall_rounds >= 4) {
-						timeline_inc(layer_info->timeline, lag);
 						if (time_after(jiffies, xdplus_last_pr + HZ)) {
 							xdplus_last_pr = jiffies;
-							pr_info("[XDPLUS-EXTFENCE] orphaned present fences: forced +%d (prepared=%u signalled=%u trig_idx=%u)\n",
+							pr_info("[XDPLUS-EXTFENCE] orphaned present fences: lag %d (prepared=%u signalled=%u trig_idx=%u)\n",
 								lag, layer_info->fence_idx,
 								layer_info->timeline->value,
 								g_ext_PresentFenceIndex);

@@ -137,14 +137,6 @@ unsigned long long last_primary_trigger_time = 0xffffffffffffffff;
  * during ordinary handling of a healthy mirror. What a healthy display cannot
  * do is go tens of seconds with no frame while the user keeps interacting.
  */
-#define WEDGEWD_QUIET_MS	20000	/* submission silence before we look */
-#define WEDGEWD_INPUT_MS	5000	/* input older than this ends the case */
-#define WEDGEWD_CONSEC		3	/* qualifying 1 Hz ticks before firing */
-#define WEDGEWD_MAX_FIRE	8	/* per boot; then log once and stop */
-
-static atomic64_t g_last_input_ns = ATOMIC64_INIT(0);
-static atomic_t g_wedgewd_fired = ATOMIC_INIT(0);
-
 static void disp_set_sodi(unsigned int enable, void *cmdq_handle);
 
 /* DDP_SCENARIO_ENUM ddp_scenario = DDP_SCENARIO_SUB_RDMA1_DISP; */
@@ -2617,135 +2609,6 @@ static int _fence_release_worker_thread(void *data)
 
 static struct task_struct *present_fence_release_worker_task;
 
-static void wedgewd_input_event(struct input_handle *handle, unsigned int type,
-				unsigned int code, int value)
-{
-	/* Key/touch activity only; SYN and device housekeeping are not user input. */
-	if (type == EV_KEY || type == EV_ABS || type == EV_REL)
-		atomic64_set(&g_last_input_ns, sched_clock());
-}
-
-static int wedgewd_input_connect(struct input_handler *handler,
-				 struct input_dev *dev,
-				 const struct input_device_id *id)
-{
-	struct input_handle *handle;
-	int ret;
-
-	handle = kzalloc(sizeof(*handle), GFP_KERNEL);
-	if (!handle)
-		return -ENOMEM;
-
-	handle->dev = dev;
-	handle->handler = handler;
-	handle->name = "xdplus_wedgewd";
-
-	ret = input_register_handle(handle);
-	if (ret)
-		goto err_free;
-	ret = input_open_device(handle);
-	if (ret)
-		goto err_unregister;
-
-	return 0;
-
-err_unregister:
-	input_unregister_handle(handle);
-err_free:
-	kfree(handle);
-	return ret;
-}
-
-static void wedgewd_input_disconnect(struct input_handle *handle)
-{
-	input_close_device(handle);
-	input_unregister_handle(handle);
-	kfree(handle);
-}
-
-static const struct input_device_id wedgewd_input_ids[] = {
-	{ .driver_info = 1 },	/* match every input device */
-	{ },
-};
-
-static struct input_handler wedgewd_input_handler = {
-	.event		= wedgewd_input_event,
-	.connect	= wedgewd_input_connect,
-	.disconnect	= wedgewd_input_disconnect,
-	.name		= "xdplus_wedgewd",
-	.id_table	= wedgewd_input_ids,
-};
-
-/*
- * Called once per heartbeat tick. Returns with nothing held.
- */
-static void wedgewd_check(void)
-{
-	static unsigned long last_tick;
-	static unsigned int consec;
-	unsigned long long now, last_sub, last_in;
-	unsigned int fired;
-
-	if (!gEnableWedgeWatchdog)
-		return;
-
-	/* The caller's loop runs per vsync, not per second. Gate to 1 Hz here
-	 * or an eight-fire budget burns in a tenth of a second.
-	 */
-	if (!time_after(jiffies, last_tick + HZ))
-		return;
-	last_tick = jiffies;
-
-	if (pgc->state != DISP_ALIVE ||
-	    pgc->session_mode != DISP_SESSION_DECOUPLE_MIRROR_MODE) {
-		consec = 0;
-		return;
-	}
-
-	now = sched_clock();
-	last_sub = last_primary_trigger_time;
-	last_in = (unsigned long long)atomic64_read(&g_last_input_ns);
-
-	if (last_sub == 0xffffffffffffffff || now < last_sub) {
-		consec = 0;
-		return;
-	}
-
-	/*
-	 * Three conditions, all required: submissions silent for a long time,
-	 * the user has asked for something since the last frame produced, and
-	 * the user is still here now. A static idle mirror fails the third,
-	 * an idle screen the user walked away from fails it too.
-	 */
-	if ((now - last_sub) < (unsigned long long)WEDGEWD_QUIET_MS * 1000000 ||
-	    last_in <= last_sub ||
-	    (now - last_in) > (unsigned long long)WEDGEWD_INPUT_MS * 1000000) {
-		consec = 0;
-		return;
-	}
-
-	if (++consec < WEDGEWD_CONSEC)
-		return;
-	consec = 0;
-
-	fired = atomic_inc_return(&g_wedgewd_fired);
-	if (fired > WEDGEWD_MAX_FIRE) {
-		if (fired == WEDGEWD_MAX_FIRE + 1)
-			DISPMSG("[WEDGEWD] fire limit reached, silent for this boot\n");
-		return;
-	}
-
-	/*
-	 * Log only. Evidence collection is driven from userspace by watching
-	 * for this line: call_usermodehelper reported a successful spawn here
-	 * while the helper never ran, and a userspace watcher needs no kernel
-	 * privilege to do the same job.
-	 */
-	DISPMSG("[WEDGEWD] WEDGE SUSPECTED (%u/%u): no submission for %llums, input %llums ago, state=%d smode=%d\n",
-		fired, WEDGEWD_MAX_FIRE, (now - last_sub) / 1000000,
-		(now - last_in) / 1000000, pgc->state, pgc->session_mode);
-}
-
 static int _present_fence_release_worker_thread(void *data)
 {
 	int ret = 0;
@@ -2830,7 +2693,6 @@ static int _present_fence_release_worker_thread(void *data)
 			}
 		}
 
-		wedgewd_check();
 	}
 	return 0;
 }
@@ -3268,9 +3130,6 @@ int primary_display_init(struct platform_device *dev, char *lcm_name, unsigned i
 	present_fence_release_worker_task =
 	    kthread_create(_present_fence_release_worker_thread, NULL, "present_fence_worker");
 	wake_up_process(present_fence_release_worker_task);
-
-	if (input_register_handler(&wedgewd_input_handler))
-		DISPERR("[WEDGEWD] input handler registration failed, watchdog disarmed\n");
 
 	if (decouple_fence_release_task == NULL) {
 		disp_register_module_irq_callback(DISP_MODULE_OVL0,
