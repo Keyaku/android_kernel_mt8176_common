@@ -13,6 +13,7 @@
 
 #include <linux/delay.h>
 #include <linux/errno.h>
+#include <linux/mutex.h>
 
 #include <mt-plat/upmu_common.h>
 #include <mt-plat/mt_reboot.h>
@@ -26,6 +27,13 @@
 
 static s32 g_hw_ocv_tune_value = 8;	/* hwocv chip calibration value */
 static bool g_fg_is_charging;
+
+/* Serialises the non-atomic FGADC_CON0 read sequence. */
+static DEFINE_MUTEX(fg_hw_lock);
+
+/* Last completed sample, reused when a data-ready poll times out. */
+static s32 g_fg_last_current;
+static bool g_fg_last_is_charging;
 
 static struct mt_battery_meter_custom_data *bat_meter_data;
 
@@ -80,7 +88,7 @@ static u32 fg_get_data_ready_status(void)
 	return temp_val;
 }
 
-static s32 fgauge_read_current(void *data);
+static s32 fgauge_read_current_locked(void *data);
 static s32 fgauge_initialization(void *data)
 {
 	u32 ret = 0;
@@ -88,6 +96,8 @@ static s32 fgauge_initialization(void *data)
 	int m = 0;
 
 	bat_meter_data = (struct mt_battery_meter_custom_data *) data;
+
+	mutex_lock(&fg_hw_lock);
 
 	/* 1. HW initialization */
 	/* FGADC clock is 32768Hz from RTC */
@@ -109,7 +119,7 @@ static s32 fgauge_initialization(void *data)
 	/* make sure init finish */
 	m = 0;
 	while (current_temp == 0) {
-		fgauge_read_current(&current_temp);
+		fgauge_read_current_locked(&current_temp);
 		m++;
 		if (m > 1000) {
 			pr_warn("[fgauge_initialization] timeout!\r\n");
@@ -117,16 +127,20 @@ static s32 fgauge_initialization(void *data)
 		}
 	}
 
+	mutex_unlock(&fg_hw_lock);
+
 	pr_debug("******** [fgauge_initialization] Done!\n");
 
 	return 0;
 }
 
-static s32 fgauge_read_current(void *data)
+/* Caller must hold fg_hw_lock. */
+static s32 fgauge_read_current_locked(void *data)
 {
 	u16 uvalue16 = 0;
 	s32 dvalue = 0;
 	int m = 0;
+	bool timeout = false;
 	s64 Temp_Value = 0;
 	s32 Current_Compensate_Value = 0;
 	u32 ret = 0;
@@ -150,6 +164,7 @@ static s32 fgauge_read_current(void *data)
 		m++;
 		if (m > 1000) {
 			pr_warn("[fgauge_read_current] fg_get_data_ready_status timeout 1 !\r\n");
+			timeout = true;
 			break;
 		}
 	}
@@ -172,6 +187,15 @@ static s32 fgauge_read_current(void *data)
 	}
 	/* (8)    Recover original settings */
 	ret = pmic_config_interface(FGADC_CON0, 0x0000, 0xFF00, 0x0);
+
+	/* Never latched: the register still holds the previous sequence's
+	 * sample, so return the last completed one instead of decoding it.
+	 */
+	if (timeout) {
+		g_fg_is_charging = g_fg_last_is_charging;
+		*(s32 *) (data) = g_fg_last_current;
+		return 0;
+	}
 
 	/* calculate the real world data */
 	dvalue = (u32) uvalue16;
@@ -225,14 +249,31 @@ static s32 fgauge_read_current(void *data)
 
 	pr_debug("[fgauge_read_current] final current=%d (ratio=%d)\n", dvalue, car_tune_value);
 
+	g_fg_last_current = dvalue;
+	g_fg_last_is_charging = g_fg_is_charging;
+
 	*(s32 *) (data) = dvalue;
 
 	return 0;
 }
 
+static s32 fgauge_read_current(void *data)
+{
+	s32 ret;
+
+	mutex_lock(&fg_hw_lock);
+	ret = fgauge_read_current_locked(data);
+	mutex_unlock(&fg_hw_lock);
+
+	return ret;
+}
+
 static s32 fgauge_read_current_sign(void *data)
 {
+	/* Locked so the sign belongs to a finished sample. */
+	mutex_lock(&fg_hw_lock);
 	*(bool *) (data) = g_fg_is_charging;
+	mutex_unlock(&fg_hw_lock);
 
 	return 0;
 }
@@ -342,7 +383,13 @@ static s32 fgauge_read_columb_internal(void *data, int reset)
 
 static s32 fgauge_read_columb(void *data)
 {
-	return fgauge_read_columb_internal(data, 0);
+	s32 ret;
+
+	mutex_lock(&fg_hw_lock);
+	ret = fgauge_read_columb_internal(data, 0);
+	mutex_unlock(&fg_hw_lock);
+
+	return ret;
 }
 
 static s32 fgauge_hw_reset(void *data)
@@ -352,11 +399,18 @@ static s32 fgauge_hw_reset(void *data)
 
 	pr_debug("[fgauge_hw_reset] : Start \r\n");
 
+	/* Held across the loop: a read between the reset and its confirming
+	 * CAR read would keep val_car non-zero forever.
+	 */
+	mutex_lock(&fg_hw_lock);
+
 	while (val_car != 0x0) {
 		ret = pmic_config_interface(FGADC_CON0, 0x7100, 0xFF00, 0x0);
 		fgauge_read_columb_internal(&val_car, 1);
 		pr_debug("#");
 	}
+
+	mutex_unlock(&fg_hw_lock);
 
 	pr_debug("[fgauge_hw_reset] : End \r\n");
 
