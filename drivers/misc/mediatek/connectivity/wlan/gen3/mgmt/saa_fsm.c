@@ -1364,6 +1364,17 @@ VOID saaFsmRunEventAbort(IN P_ADAPTER_T prAdapter, IN P_MSG_HDR_T prMsgHdr)
 	/* Cancel JOIN relative Timer */
 	cnmTimerStopTimer(prAdapter, &prStaRec->rTxReqDoneOrRxRespTimer);
 
+	/* SAE external auth: SAA is parked at IDLE while userspace runs the
+	 * exchange, so this abort is what tears it down. Drop the marker before
+	 * the record is freed, so a late completion validates out instead of
+	 * dereferencing freed memory.
+	 */
+	if (prAdapter->rWifiVar.rAisFsmInfo.fgIsSaeExternalAuth &&
+	    prStaRec == prAdapter->rWifiVar.rAisFsmInfo.prTargetStaRec) {
+		DBGLOG(SAA, INFO, "EVENT-ABORT: dropping live SAE external auth marker\n");
+		prAdapter->rWifiVar.rAisFsmInfo.fgIsSaeExternalAuth = FALSE;
+	}
+
 	if (prStaRec->eAuthAssocState != AA_STATE_IDLE) {
 #if DBG
 		DBGLOG(SAA, LOUD, "EVENT-ABORT: Previous Auth/Assoc State == %s.\n",

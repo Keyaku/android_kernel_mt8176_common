@@ -40,6 +40,11 @@
 #define AIS_ROAMING_CONNECTION_TRIAL_LIMIT  2
 #define AIS_JOIN_TIMEOUT                    7
 
+/* Number of extra channel-grant windows a userspace SAE exchange may ask for
+ * before the join is failed. The granted window was measured at 4000 ms.
+ */
+#define AIS_SAE_CH_EXT_MAX                  3
+
 #define CTIA_MAGIC_SSID                     "no_use_ctia_ssid"	/* "ctia_test_only_*#*#3646633#*#*" */
 #define CTIA_MAGIC_SSID_LEN                 30
 
@@ -430,6 +435,33 @@ VOID aisFsmStateInit_JOIN(IN P_ADAPTER_T prAdapter, P_BSS_DESC_T prBssDesc)
 	if (prStaRec->ucStaState == STA_STATE_1)
 		cnmStaRecChangeState(prAdapter, prStaRec, STA_STATE_1);
 
+	/* 4 <2.2> SAE: the authentication exchange is run by userspace (external
+	 * auth), not by the SAA FSM. Park here: ask userspace to authenticate
+	 * and wait for the result on MID_MNY_AIS_EXTERNAL_AUTH. The join
+	 * timeout timer (armed from the channel grant) guards the wait.
+	 */
+	if ((prAisBssInfo->eConnectionState == PARAM_MEDIA_STATE_DISCONNECTED) &&
+	    (prConnSettings->eAuthMode == AUTH_MODE_WPA2_SAE)) {
+		prStaRec->fgIsReAssoc = FALSE;
+		prStaRec->ucAuthAlgNum = (UINT_8) AUTH_ALGORITHM_NUM_SAE;
+		prStaRec->ucTxAuthAssocRetryLimit = TX_AUTH_ASSOCI_RETRY_LIMIT;
+		prStaRec->ucAuthAssocReqSeqNum = ++prAisFsmInfo->ucSeqNumOfReqMsg;
+
+		/* No driver-side auth-type retry exists for SAE. */
+		prAisFsmInfo->ucAvailableAuthTypes = 0;
+
+		prAisFsmInfo->fgIsSaeExternalAuth = TRUE;
+		prAisFsmInfo->ucSaeChExtCount = 0;
+
+		DBGLOG(AIS, INFO, "JOIN INIT: SAE external auth, requesting userspace authentication\n");
+
+		if (prAdapter->prGlueInfo)
+			kalExternalAuthRequest(prAdapter->prGlueInfo,
+					       prStaRec->aucMacAddr, prBssDesc->aucSSID, prBssDesc->ucSSIDLen);
+
+		return;
+	}
+
 	/* 4 <3> Update ucAvailableAuthTypes which we can choice during SAA */
 	if (prAisBssInfo->eConnectionState == PARAM_MEDIA_STATE_DISCONNECTED) {
 
@@ -441,6 +473,7 @@ VOID aisFsmStateInit_JOIN(IN P_ADAPTER_T prAdapter, P_BSS_DESC_T prBssDesc)
 		case AUTH_MODE_WPA_PSK:
 		case AUTH_MODE_WPA2:
 		case AUTH_MODE_WPA2_PSK:
+		case AUTH_MODE_WPA2_SAE:
 			prAisFsmInfo->ucAvailableAuthTypes = (UINT_8) AUTH_TYPE_OPEN_SYSTEM;
 			break;
 
@@ -688,6 +721,12 @@ VOID aisFsmStateAbort_JOIN(IN P_ADAPTER_T prAdapter)
 
 	prAisFsmInfo = &(prAdapter->rWifiVar.rAisFsmInfo);
 
+	/* A userspace SAE exchange, if live, ends with the join it belonged to.
+	 * The marker must drop before the STA record is freed so a late
+	 * external-auth completion validates out instead of touching it.
+	 */
+	prAisFsmInfo->fgIsSaeExternalAuth = FALSE;
+
 	/* 1. Abort JOIN process */
 	prJoinAbortMsg = (P_MSG_JOIN_ABORT_T) cnmMemAlloc(prAdapter, RAM_TYPE_MSG, sizeof(MSG_JOIN_ABORT_T));
 	if (!prJoinAbortMsg) {
@@ -921,6 +960,57 @@ VOID aisGetAndSetScanChannel(IN P_ADAPTER_T prAdapter)
 		kalMemFree(PartialScanChannel, VIR_MEM_TYPE, sizeof(PARTIAL_SCAN_INFO));
 	}
 }
+
+/*----------------------------------------------------------------------------*/
+/*!
+* @brief Ask CNM for the channel privilege needed for JOIN
+*
+* Shared by AIS_STATE_REQ_CHANNEL_JOIN and by the SAE external-auth grant
+* extension, which re-enters this while parked in AIS_STATE_JOIN.
+*
+* @param[in] prAdapter  Pointer of ADAPTER_T
+*
+* @return (none)
+*/
+/*----------------------------------------------------------------------------*/
+VOID aisFsmRequestJoinChannel(IN P_ADAPTER_T prAdapter)
+{
+	P_AIS_FSM_INFO_T prAisFsmInfo;
+	P_MSG_CH_REQ_T prMsgChReq;
+
+	prAisFsmInfo = &(prAdapter->rWifiVar.rAisFsmInfo);
+
+	/* send message to CNM for acquiring channel */
+	prMsgChReq = (P_MSG_CH_REQ_T) cnmMemAlloc(prAdapter, RAM_TYPE_MSG, sizeof(MSG_CH_REQ_T));
+	if (!prMsgChReq) {
+		ASSERT(0);	/* Can't indicate CNM for channel acquiring */
+		return;
+	}
+
+	if (prAisFsmInfo->prTargetBssDesc == NULL) {
+		cnmMemFree(prAdapter, prMsgChReq);
+		return;
+	}
+
+	prMsgChReq->rMsgHdr.eMsgId = MID_MNY_CNM_CH_REQ;
+	prMsgChReq->ucBssIndex = prAdapter->prAisBssInfo->ucBssIndex;
+	prMsgChReq->ucTokenID = ++prAisFsmInfo->ucSeqNumOfChReq;
+	prMsgChReq->eReqType = CH_REQ_TYPE_JOIN;
+	prMsgChReq->u4MaxInterval = AIS_JOIN_CH_REQUEST_INTERVAL;
+	prMsgChReq->ucPrimaryChannel = prAisFsmInfo->prTargetBssDesc->ucChannelNum;
+	prMsgChReq->eRfSco = prAisFsmInfo->prTargetBssDesc->eSco;
+	prMsgChReq->eRfBand = prAisFsmInfo->prTargetBssDesc->eBand;
+
+	/* To do: check if 80/160MHz bandwidth is needed here */
+	prMsgChReq->eRfChannelWidth = prAisFsmInfo->prTargetBssDesc->eChannelWidth;
+	prMsgChReq->ucRfCenterFreqSeg1 = prAisFsmInfo->prTargetBssDesc->ucCenterFreqS1;
+	prMsgChReq->ucRfCenterFreqSeg2 = prAisFsmInfo->prTargetBssDesc->ucCenterFreqS2;
+
+	mboxSendMsg(prAdapter, MBOX_ID_0, (P_MSG_HDR_T) prMsgChReq, MSG_SEND_METHOD_BUF);
+
+	prAisFsmInfo->fgIsChannelRequested = TRUE;
+
+}				/* end of aisFsmRequestJoinChannel() */
 
 /*----------------------------------------------------------------------------*/
 /*!
@@ -1493,32 +1583,7 @@ VOID aisFsmSteps(IN P_ADAPTER_T prAdapter, ENUM_AIS_STATE_T eNextState)
 
 		case AIS_STATE_REQ_CHANNEL_JOIN:
 			/* send message to CNM for acquiring channel */
-			prMsgChReq = (P_MSG_CH_REQ_T) cnmMemAlloc(prAdapter, RAM_TYPE_MSG, sizeof(MSG_CH_REQ_T));
-			if (!prMsgChReq) {
-				ASSERT(0);	/* Can't indicate CNM for channel acquiring */
-				return;
-			}
-
-			if (prAisFsmInfo->prTargetBssDesc == NULL)
-				break;
-
-			prMsgChReq->rMsgHdr.eMsgId = MID_MNY_CNM_CH_REQ;
-			prMsgChReq->ucBssIndex = prAdapter->prAisBssInfo->ucBssIndex;
-			prMsgChReq->ucTokenID = ++prAisFsmInfo->ucSeqNumOfChReq;
-			prMsgChReq->eReqType = CH_REQ_TYPE_JOIN;
-			prMsgChReq->u4MaxInterval = AIS_JOIN_CH_REQUEST_INTERVAL;
-			prMsgChReq->ucPrimaryChannel = prAisFsmInfo->prTargetBssDesc->ucChannelNum;
-			prMsgChReq->eRfSco = prAisFsmInfo->prTargetBssDesc->eSco;
-			prMsgChReq->eRfBand = prAisFsmInfo->prTargetBssDesc->eBand;
-
-			/* To do: check if 80/160MHz bandwidth is needed here */
-			prMsgChReq->eRfChannelWidth = prAisFsmInfo->prTargetBssDesc->eChannelWidth;
-			prMsgChReq->ucRfCenterFreqSeg1 = prAisFsmInfo->prTargetBssDesc->ucCenterFreqS1;
-			prMsgChReq->ucRfCenterFreqSeg2 = prAisFsmInfo->prTargetBssDesc->ucCenterFreqS2;
-
-			mboxSendMsg(prAdapter, MBOX_ID_0, (P_MSG_HDR_T) prMsgChReq, MSG_SEND_METHOD_BUF);
-
-			prAisFsmInfo->fgIsChannelRequested = TRUE;
+			aisFsmRequestJoinChannel(prAdapter);
 			break;
 
 		case AIS_STATE_JOIN:
@@ -3524,6 +3589,27 @@ VOID aisFsmRunEventJoinTimeout(IN P_ADAPTER_T prAdapter, ULONG ulParamPtr)
 	case AIS_STATE_JOIN:
 		DBGLOG(AIS, LOUD, "EVENT- JOIN TIMEOUT\n");
 
+		/* SAE external auth: the granted window (measured 4000 ms) can be
+		 * too short for a userspace exchange under contention. Ask CNM
+		 * for a fresh grant instead of failing, a bounded number of times.
+		 */
+		if (prAisFsmInfo->fgIsSaeExternalAuth) {
+			if (prAisFsmInfo->ucSaeChExtCount < AIS_SAE_CH_EXT_MAX) {
+				prAisFsmInfo->ucSaeChExtCount++;
+				DBGLOG(AIS, INFO,
+				       "JOIN TIMEOUT during SAE external auth, re-requesting channel (%d/%d)\n",
+				       prAisFsmInfo->ucSaeChExtCount, AIS_SAE_CH_EXT_MAX);
+				aisFsmReleaseCh(prAdapter);
+				aisFsmRequestJoinChannel(prAdapter);
+				break;	/* stay in AIS_STATE_JOIN; grant returns to aisFsmRunEventChGrant */
+			}
+			/* Out of extensions: carry a real status code and fail below. */
+			DBGLOG(AIS, WARN, "JOIN TIMEOUT during SAE external auth, no extensions left\n");
+			prAisFsmInfo->fgIsSaeExternalAuth = FALSE;
+			if (prAisFsmInfo->prTargetStaRec)
+				prAisFsmInfo->prTargetStaRec->u2StatusCode = STATUS_CODE_AUTH_TIMEOUT;
+		}
+
 		/* 1. Do abort JOIN */
 		aisFsmStateAbort_JOIN(prAdapter);
 
@@ -3577,6 +3663,94 @@ VOID aisFsmRunEventJoinTimeout(IN P_ADAPTER_T prAdapter, ULONG ulParamPtr)
 		aisFsmSteps(prAdapter, eNextState);
 
 }				/* end of aisFsmRunEventJoinTimeout() */
+
+/*----------------------------------------------------------------------------*/
+/*!
+* @brief Handle the external (userspace SAE) authentication result.
+*
+* Sent by the cfg80211 external_auth op as MID_MNY_AIS_EXTERNAL_AUTH. On
+* success the STA record is moved to STA_STATE_2 and the SAA FSM is started,
+* which then enters directly at SAA_STATE_SEND_ASSOC1. On failure the real
+* status code is carried into the normal join-failure path so the
+* retry/blacklist logic annotates the BSS correctly.
+*
+* @param[in] prMsgHdr   MSG_AIS_EXTERNAL_AUTH_T
+*
+* @return (none)
+*/
+/*----------------------------------------------------------------------------*/
+VOID aisFsmRunEventExternalAuth(IN P_ADAPTER_T prAdapter, IN P_MSG_HDR_T prMsgHdr)
+{
+	P_AIS_FSM_INFO_T prAisFsmInfo;
+	P_MSG_AIS_EXTERNAL_AUTH_T prExtAuthMsg;
+	P_STA_RECORD_T prStaRec;
+	P_MSG_JOIN_REQ_T prJoinReqMsg;
+
+	ASSERT(prAdapter);
+	ASSERT(prMsgHdr);
+
+	prAisFsmInfo = &(prAdapter->rWifiVar.rAisFsmInfo);
+	prExtAuthMsg = (P_MSG_AIS_EXTERNAL_AUTH_T) prMsgHdr;
+	prStaRec = prAisFsmInfo->prTargetStaRec;
+
+	do {
+		/* Validate against the live exchange; anything else is stale. */
+		if (!prAisFsmInfo->fgIsSaeExternalAuth) {
+			DBGLOG(AIS, WARN, "EXTERNAL_AUTH: no SAE exchange in progress, drop\n");
+			break;
+		}
+		if (prAisFsmInfo->eCurrentState != AIS_STATE_JOIN) {
+			DBGLOG(AIS, WARN, "EXTERNAL_AUTH: not in JOIN state (%d), drop\n",
+					   prAisFsmInfo->eCurrentState);
+			break;
+		}
+		if (!prStaRec || !prStaRec->fgIsInUse) {
+			DBGLOG(AIS, WARN, "EXTERNAL_AUTH: target STA record gone, drop\n");
+			break;
+		}
+		if (!EQUAL_MAC_ADDR(prExtAuthMsg->aucBSSID, prStaRec->aucMacAddr)) {
+			DBGLOG(AIS, WARN, "EXTERNAL_AUTH: BSSID " MACSTR " does not match target " MACSTR ", drop\n",
+					   MAC2STR(prExtAuthMsg->aucBSSID), MAC2STR(prStaRec->aucMacAddr));
+			break;
+		}
+
+		prAisFsmInfo->fgIsSaeExternalAuth = FALSE;
+
+		if (prExtAuthMsg->u2StatusCode == STATUS_CODE_SUCCESSFUL) {
+			DBGLOG(AIS, INFO, "EXTERNAL_AUTH: SAE succeeded, starting association\n");
+
+			/* Authentication done by userspace: mark Class 2 and start
+			 * the SAA FSM, which enters at SAA_STATE_SEND_ASSOC1.
+			 */
+			cnmStaRecChangeState(prAdapter, prStaRec, STA_STATE_2);
+
+			prJoinReqMsg = (P_MSG_JOIN_REQ_T) cnmMemAlloc(prAdapter, RAM_TYPE_MSG, sizeof(MSG_JOIN_REQ_T));
+			if (prJoinReqMsg) {
+				prJoinReqMsg->rMsgHdr.eMsgId = MID_AIS_SAA_FSM_START;
+				prJoinReqMsg->ucSeqNum = ++prAisFsmInfo->ucSeqNumOfReqMsg;
+				prJoinReqMsg->prStaRec = prStaRec;
+
+				mboxSendMsg(prAdapter, MBOX_ID_0, (P_MSG_HDR_T) prJoinReqMsg, MSG_SEND_METHOD_BUF);
+				break;
+			}
+			/* alloc failed: fall through to the failure path */
+			prStaRec->u2StatusCode = STATUS_CODE_AUTH_TIMEOUT;
+		} else {
+			DBGLOG(AIS, INFO, "EXTERNAL_AUTH: SAE failed, status %u\n", prExtAuthMsg->u2StatusCode);
+
+			/* Blocker 4: carry the real status code into the
+			 * retry/blacklist path via the normal join-failure event.
+			 */
+			prStaRec->u2StatusCode = prExtAuthMsg->u2StatusCode;
+		}
+
+		saaFsmSendEventJoinComplete(prAdapter, WLAN_STATUS_FAILURE, prStaRec, NULL);
+
+	} while (FALSE);
+
+	cnmMemFree(prAdapter, prMsgHdr);
+
+}				/* end of aisFsmRunEventExternalAuth() */
 
 VOID aisFsmRunEventDeauthTimeout(IN P_ADAPTER_T prAdapter, ULONG ulParamPtr)
 {
@@ -3836,6 +4010,19 @@ VOID aisFsmRunEventChGrant(IN P_ADAPTER_T prAdapter, IN P_MSG_HDR_T prMsgHdr)
 
 		/* 3.3 switch to join state */
 		aisFsmSteps(prAdapter, AIS_STATE_JOIN);
+
+		prAisFsmInfo->fgIsChannelGranted = TRUE;
+	} else if (prAisFsmInfo->eCurrentState == AIS_STATE_JOIN &&
+		   prAisFsmInfo->fgIsSaeExternalAuth &&
+		   prAisFsmInfo->ucSeqNumOfChReq == ucTokenID) {
+		/* Channel-grant extension during a userspace SAE exchange:
+		 * re-arm the join timer with the fresh window, stay in JOIN.
+		 */
+		prAisFsmInfo->u4ChGrantedInterval = u4GrantInterval;
+
+		cnmTimerStartTimer(prAdapter,
+				   &prAisFsmInfo->rJoinTimeoutTimer,
+				   prAisFsmInfo->u4ChGrantedInterval - AIS_JOIN_CH_GRANT_THRESHOLD);
 
 		prAisFsmInfo->fgIsChannelGranted = TRUE;
 	} else if (prAisFsmInfo->eCurrentState == AIS_STATE_REQ_REMAIN_ON_CHANNEL &&

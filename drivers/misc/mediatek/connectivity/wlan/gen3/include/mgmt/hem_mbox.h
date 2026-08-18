@@ -134,6 +134,8 @@ typedef enum _ENUM_MSG_ID_T {
 	MID_CNM_AIS_RSP_CH_UTIL,
 	MID_MNY_CNM_SCAN_CONTINUE,
 
+	MID_MNY_AIS_EXTERNAL_AUTH,	/* Glue notify AIS of external (SAE) auth result */
+
 	MID_TOTAL_NUM
 } ENUM_MSG_ID_T, *P_ENUM_MSG_ID_T;
 
@@ -213,6 +215,12 @@ typedef struct _MSG_MGMT_TX_REQUEST_T {
 	BOOLEAN fgNoneCckRate;
 	BOOLEAN fgIsWaitRsp;
 } MSG_MGMT_TX_REQUEST_T, *P_MSG_MGMT_TX_REQUEST_T;
+
+typedef struct _MSG_AIS_EXTERNAL_AUTH_T {
+	MSG_HDR_T rMsgHdr;	/* Must be the first member */
+	UINT_8 aucBSSID[MAC_ADDR_LEN];
+	UINT_16 u2StatusCode;
+} MSG_AIS_EXTERNAL_AUTH_T, *P_MSG_AIS_EXTERNAL_AUTH_T;
 
 /* specific message data types */
 typedef MSG_SAA_FSM_START_T MSG_JOIN_REQ_T, *P_MSG_JOIN_REQ_T;

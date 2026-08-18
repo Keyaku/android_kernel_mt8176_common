@@ -121,7 +121,8 @@ static PUINT_8 apucDebugMsg[] = {
 	(PUINT_8) DISP_STRING("MID_SAA_AIS_FSM_ABORT"),
 	(PUINT_8) DISP_STRING("MID_MNY_AIS_REMAIN_ON_CHANNEL"),
 	(PUINT_8) DISP_STRING("MID_MNY_AIS_CANCEL_REMAIN_ON_CHANNEL"),
-	(PUINT_8) DISP_STRING("MID_MNY_AIS_MGMT_TX")
+	(PUINT_8) DISP_STRING("MID_MNY_AIS_MGMT_TX"),
+	(PUINT_8) DISP_STRING("MID_MNY_AIS_EXTERNAL_AUTH")
 
 };
 
@@ -231,6 +232,7 @@ static MSG_HNDL_ENTRY_T arMsgMapTable[] = {
 	{MID_MNY_CNM_REQ_CH_UTIL, cnmRequestChannelUtilization},
 	{MID_CNM_AIS_RSP_CH_UTIL, aisRunEventChnlUtilRsp},
 	{MID_MNY_CNM_SCAN_CONTINUE, scnFsmMsgStart},
+	{MID_MNY_AIS_EXTERNAL_AUTH, aisFsmRunEventExternalAuth},
 };
 
 /*******************************************************************************

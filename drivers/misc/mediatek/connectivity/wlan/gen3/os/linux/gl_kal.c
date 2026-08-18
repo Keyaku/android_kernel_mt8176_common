@@ -4054,6 +4054,56 @@ VOID kalIndicateRxMgmtFrame(IN P_GLUE_INFO_T prGlueInfo, IN P_SW_RFB_T prSwRfb)
 
 }				/* kalIndicateRxMgmtFrame */
 
+/*----------------------------------------------------------------------------*/
+/*!
+* @brief Ask userspace to run authentication (SAE external auth) against a BSS.
+*
+* Emits NL80211_CMD_EXTERNAL_AUTH with NL80211_EXTERNAL_AUTH_START. The result
+* comes back through the mtk_cfg80211_external_auth() op.
+*
+* @param[in] prGlueInfo   Pointer of GLUE_INFO_T
+* @param[in] pucBssid     BSSID of the target AP
+* @param[in] pucSsid      SSID of the target AP
+* @param[in] ucSsidLen    Length of the SSID
+*
+* @return (none)
+*/
+/*----------------------------------------------------------------------------*/
+VOID kalExternalAuthRequest(IN P_GLUE_INFO_T prGlueInfo,
+			    IN PUINT_8 pucBssid, IN PUINT_8 pucSsid, IN UINT_8 ucSsidLen)
+{
+	struct cfg80211_external_auth_params rParams;
+
+	do {
+		if ((prGlueInfo == NULL) || (prGlueInfo->prDevHandler == NULL) || (pucBssid == NULL)) {
+			ASSERT(FALSE);
+			break;
+		}
+
+		kalMemZero(&rParams, sizeof(rParams));
+
+		rParams.action = NL80211_EXTERNAL_AUTH_START;
+		COPY_MAC_ADDR(rParams.bssid, pucBssid);
+		/* The supplicant gates on RSN_SELECTOR_GET(key_mgmt_suite),
+		 * which re-reads the u32 big-endian; send the AKM in the
+		 * driver's wire order (RSN_AKM_SUITE_SAE), not WLAN_AKM_SUITE_SAE.
+		 */
+		rParams.key_mgmt_suite = RSN_AKM_SUITE_SAE;
+		rParams.status = WLAN_STATUS_SUCCESS;
+
+		if (pucSsid && ucSsidLen > 0 && ucSsidLen <= IEEE80211_MAX_SSID_LEN) {
+			rParams.ssid.ssid_len = ucSsidLen;
+			kalMemCopy(rParams.ssid.ssid, pucSsid, ucSsidLen);
+		}
+
+		DBGLOG(REQ, INFO, "external auth request: bssid " MACSTR "\n", MAC2STR(pucBssid));
+
+		cfg80211_external_auth_request(prGlueInfo->prDevHandler, &rParams, GFP_KERNEL);
+
+	} while (FALSE);
+
+}				/* kalExternalAuthRequest */
+
 #if CFG_SUPPORT_SDIO_READ_WRITE_PATTERN
 /*----------------------------------------------------------------------------*/
 /*!

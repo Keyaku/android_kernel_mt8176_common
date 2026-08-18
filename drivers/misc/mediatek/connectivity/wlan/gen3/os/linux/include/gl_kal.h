@@ -727,6 +727,9 @@ kalIndicateMgmtTxStatus(IN P_GLUE_INFO_T prGlueInfo,
 
 VOID kalIndicateRxMgmtFrame(IN P_GLUE_INFO_T prGlueInfo, IN P_SW_RFB_T prSwRfb);
 
+VOID kalExternalAuthRequest(IN P_GLUE_INFO_T prGlueInfo,
+			    IN PUINT_8 pucBssid, IN PUINT_8 pucSsid, IN UINT_8 ucSsidLen);
+
 /*----------------------------------------------------------------------------*/
 /* Routines in interface - ehpi/sdio.c                                                       */
 /*----------------------------------------------------------------------------*/

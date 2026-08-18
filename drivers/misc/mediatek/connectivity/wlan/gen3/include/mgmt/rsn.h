@@ -61,6 +61,7 @@
 #define RSN_AKM_SUITE_802_1X_SHA256     0x05AC0F00
 #define RSN_AKM_SUITE_PSK_SHA256        0x06AC0F00
 #endif
+#define RSN_AKM_SUITE_SAE               0x08AC0F00
 
 #define WPA_AKM_SUITE_NONE              0x00F25000
 #define WPA_AKM_SUITE_802_1X            0x01F25000
