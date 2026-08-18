@@ -293,6 +293,9 @@ int mtk_cfg80211_sched_scan_stop(IN struct wiphy *wiphy, IN struct net_device *n
 
 int mtk_cfg80211_assoc(struct wiphy *wiphy, struct net_device *ndev, struct cfg80211_assoc_request *req);
 
+int mtk_cfg80211_external_auth(struct wiphy *wiphy, struct net_device *ndev,
+			       struct cfg80211_external_auth_params *params);
+
 int
 mtk_cfg80211_change_station(struct wiphy *wiphy, struct net_device *ndev, const u8 *mac,
 				struct station_parameters *params);

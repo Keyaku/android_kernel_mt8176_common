@@ -260,6 +260,7 @@ static struct cfg80211_ops mtk_wlan_ops = {
 	.set_rekey_data = mtk_cfg80211_set_rekey_data,
 #endif
 	.assoc = mtk_cfg80211_assoc,
+	.external_auth = mtk_cfg80211_external_auth,
 	/* Action Frame TX/RX */
 	.remain_on_channel = mtk_cfg80211_remain_on_channel,
 	.cancel_remain_on_channel = mtk_cfg80211_cancel_remain_on_channel,
@@ -1434,6 +1435,9 @@ static void createWirelessDevice(void)
 	prWiphy->flags = WIPHY_FLAG_SUPPORTS_FW_ROAM | WIPHY_FLAG_HAS_REMAIN_ON_CHANNEL |
 		WIPHY_FLAG_SUPPORTS_SCHED_SCAN;
 	prWiphy->regulatory_flags = REGULATORY_CUSTOM_REG;
+	/* Lets wpa_supplicant offer SAE: without it the AKM is stripped
+	   locally and no auth frame is ever sent. */
+	prWiphy->features |= NL80211_FEATURE_SAE;
 #if CFG_SUPPORT_TDLS
 	TDLSEX_WIPHY_FLAGS_INIT(prWiphy->flags);
 	prWiphy->flags |= WIPHY_FLAG_SUPPORTS_FW_ROAM |
