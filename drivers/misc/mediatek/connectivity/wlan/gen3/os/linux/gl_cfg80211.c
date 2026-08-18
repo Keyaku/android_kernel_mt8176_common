@@ -1318,6 +1318,15 @@ void mtk_cfg80211_mgmt_frame_register(IN struct wiphy *wiphy,
 				DBGLOG(INIT, TRACE, "Close packet filer action frame.\n");
 			}
 			break;
+		case MAC_FRAME_AUTH:
+			if (reg) {
+				prGlueInfo->u4OsMgmtFrameFilter |= PARAM_PACKET_FILTER_AUTH_FRAME;
+				DBGLOG(INIT, TRACE, "Open packet filer auth frame.\n");
+			} else {
+				prGlueInfo->u4OsMgmtFrameFilter &= ~PARAM_PACKET_FILTER_AUTH_FRAME;
+				DBGLOG(INIT, TRACE, "Close packet filer auth frame.\n");
+			}
+			break;
 		default:
 			DBGLOG(INIT, TRACE, "Ask frog to add code for mgmt:%x\n", frame_type);
 			break;
