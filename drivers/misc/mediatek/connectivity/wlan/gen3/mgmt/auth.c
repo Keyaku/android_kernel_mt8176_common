@@ -501,6 +501,10 @@ WLAN_STATUS authCheckRxAuthFrameTransSeq(IN P_ADAPTER_T prAdapter, IN P_SW_RFB_T
 	/* WLAN_GET_FIELD_16(&prAuthFrame->u2AuthTransSeqNo, &u2RxTransactionSeqNum); */
 	u2RxTransactionSeqNum = prAuthFrame->u2AuthTransSeqNo;	/* NOTE(Kevin): Optimized for ARM */
 
+	/* 4 <4> Pass the frame to userspace when registered (e.g. SAE external authentication). */
+	if (prAdapter->rWifiVar.rAisFsmInfo.u4AisPacketFilter & PARAM_PACKET_FILTER_AUTH_FRAME)
+		kalIndicateRxMgmtFrame(prAdapter->prGlueInfo, prSwRfb);
+
 	switch (u2RxTransactionSeqNum) {
 	case AUTH_TRANSACTION_SEQ_2:
 	case AUTH_TRANSACTION_SEQ_4:
