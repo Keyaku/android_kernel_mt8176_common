@@ -2335,6 +2335,26 @@ struct cfg80211_qos_map {
  *	rejected)
  * @del_tx_ts: remove an existing TX TS
  */
+/**
+ * struct cfg80211_external_auth_params - external authentication parameters
+ *
+ * Carried both ways: kernel -> userspace to request an authentication, and
+ * userspace -> kernel to report its status.
+ *
+ * @action: action type, see &enum nl80211_external_auth_action
+ * @bssid: BSSID of the peer
+ * @ssid: SSID of the AP
+ * @key_mgmt_suite: AKM suite selector, as an u32 (little-endian on the wire)
+ * @status: status code, %WLAN_STATUS_SUCCESS for a successful authentication
+ */
+struct cfg80211_external_auth_params {
+	enum nl80211_external_auth_action action;
+	u8 bssid[ETH_ALEN] __aligned(2);
+	struct cfg80211_ssid ssid;
+	unsigned int key_mgmt_suite;
+	u16 status;
+};
+
 struct cfg80211_ops {
 	int	(*suspend)(struct wiphy *wiphy, struct cfg80211_wowlan *wow);
 	int	(*resume)(struct wiphy *wiphy);
@@ -2580,6 +2600,9 @@ struct cfg80211_ops {
 			     u16 admitted_time);
 	int	(*del_tx_ts)(struct wiphy *wiphy, struct net_device *dev,
 			     u8 tsid, const u8 *peer);
+
+	int	(*external_auth)(struct wiphy *wiphy, struct net_device *dev,
+				 struct cfg80211_external_auth_params *params);
 };
 
 /*
@@ -4657,6 +4680,18 @@ bool cfg80211_reg_can_beacon(struct wiphy *wiphy,
  * Caller must acquire wdev_lock, therefore must only be called from sleepable
  * driver context!
  */
+/**
+ * cfg80211_external_auth_request - ask userspace to authenticate
+ * @netdev: network device
+ * @params: authentication request parameters
+ * @gfp: allocation flags
+ *
+ * Only usable when the driver advertised external authentication support.
+ */
+int cfg80211_external_auth_request(struct net_device *netdev,
+				   struct cfg80211_external_auth_params *params,
+				   gfp_t gfp);
+
 void cfg80211_ch_switch_notify(struct net_device *dev,
 			       struct cfg80211_chan_def *chandef);
 

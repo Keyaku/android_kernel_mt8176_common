@@ -2256,6 +2256,28 @@ int mtk_cfg80211_sched_scan_stop(IN struct wiphy *wiphy, IN struct net_device *n
  *         others:  failure
  */
 /*----------------------------------------------------------------------------*/
+/*
+ * External-auth result from a userspace SME (wpa_supplicant running SAE).
+ * The op must exist for cfg80211 to advertise EXTERNAL_AUTH_SUPPORT and for
+ * the supplicant to offer SAE at all; driving the SAA FSM from the reported
+ * status is not implemented yet, so a success is still refused.
+ */
+int mtk_cfg80211_external_auth(struct wiphy *wiphy, struct net_device *ndev,
+			       struct cfg80211_external_auth_params *params)
+{
+	P_GLUE_INFO_T prGlueInfo = (P_GLUE_INFO_T) wiphy_priv(wiphy);
+
+	if (!prGlueInfo)
+		return -EFAULT;
+
+	DBGLOG(REQ, INFO,
+	       "external_auth: bssid " MACSTR ", status %u, akm 0x%x\n",
+	       MAC2STR(params->bssid), params->status,
+	       params->key_mgmt_suite);
+
+	return -EOPNOTSUPP;
+}
+
 int mtk_cfg80211_assoc(struct wiphy *wiphy, struct net_device *ndev, struct cfg80211_assoc_request *req)
 {
 	P_GLUE_INFO_T prGlueInfo = NULL;
