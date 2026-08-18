@@ -291,9 +291,10 @@ VOID cnmChMngrHandleChEvent(P_ADAPTER_T prAdapter, P_WIFI_EVENT_T prEvent)
 		return;
 	}
 
-	DBGLOG(CNM, INFO, "ChGrant net=%d token=%d ch=%d sco=%d\n",
+	DBGLOG(CNM, INFO, "ChGrant net=%d token=%d ch=%d sco=%d interval=%u\n",
 			   prEventBody->ucBssIndex, prEventBody->ucTokenID,
-			   prEventBody->ucPrimaryChannel, prEventBody->ucRfSco);
+			   prEventBody->ucPrimaryChannel, prEventBody->ucRfSco,
+			   prEventBody->u4GrantInterval);
 
 	ASSERT(prEventBody->ucBssIndex <= MAX_BSS_INDEX);
 	ASSERT(prEventBody->ucStatus == EVENT_CH_STATUS_GRANT);
