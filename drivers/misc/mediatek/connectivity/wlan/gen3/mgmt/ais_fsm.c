@@ -718,6 +718,7 @@ VOID aisFsmStateAbort_JOIN(IN P_ADAPTER_T prAdapter)
 {
 	P_AIS_FSM_INFO_T prAisFsmInfo;
 	P_MSG_JOIN_ABORT_T prJoinAbortMsg;
+	BOOLEAN fgWasSaeExternalAuth;
 
 	prAisFsmInfo = &(prAdapter->rWifiVar.rAisFsmInfo);
 
@@ -725,7 +726,18 @@ VOID aisFsmStateAbort_JOIN(IN P_ADAPTER_T prAdapter)
 	 * The marker must drop before the STA record is freed so a late
 	 * external-auth completion validates out instead of touching it.
 	 */
+	fgWasSaeExternalAuth = prAisFsmInfo->fgIsSaeExternalAuth;
 	prAisFsmInfo->fgIsSaeExternalAuth = FALSE;
+
+	/* If this JOIN was started by a cfg80211 connect request and is being
+	 * torn down before the association completed, tell cfg80211 the connect
+	 * is aborted.  Otherwise cfg80211 keeps the pending connect state (SSID,
+	 * channel pin) and blocks later scans / connects.
+	 */
+	if (fgWasSaeExternalAuth) {
+		kalIndicateStatusAndComplete(prAdapter->prGlueInfo,
+					     WLAN_STATUS_MEDIA_DISCONNECT, NULL, 0);
+	}
 
 	/* 1. Abort JOIN process */
 	prJoinAbortMsg = (P_MSG_JOIN_ABORT_T) cnmMemAlloc(prAdapter, RAM_TYPE_MSG, sizeof(MSG_JOIN_ABORT_T));
