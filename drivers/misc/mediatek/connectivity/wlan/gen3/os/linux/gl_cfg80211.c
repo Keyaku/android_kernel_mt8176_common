@@ -707,6 +707,9 @@ int mtk_cfg80211_connect(struct wiphy *wiphy, struct net_device *ndev, struct cf
 	case NL80211_AUTHTYPE_SHARED_KEY:
 		prGlueInfo->rWpaInfo.u4AuthAlg = IW_AUTH_ALG_SHARED_KEY;
 		break;
+	case NL80211_AUTHTYPE_SAE:
+		prGlueInfo->rWpaInfo.u4AuthAlg = IW_AUTH_ALG_OPEN_SYSTEM;
+		break;
 	default:
 		prGlueInfo->rWpaInfo.u4AuthAlg = IW_AUTH_ALG_OPEN_SYSTEM | IW_AUTH_ALG_SHARED_KEY;
 		break;
@@ -799,6 +802,10 @@ int mtk_cfg80211_connect(struct wiphy *wiphy, struct net_device *ndev, struct cf
 			case WLAN_AKM_SUITE_PSK_SHA256:
 				eAuthMode = AUTH_MODE_WPA2_PSK;
 				u4AkmSuite = RSN_AKM_SUITE_PSK_SHA256;
+				break;
+			case WLAN_AKM_SUITE_SAE:
+				eAuthMode = AUTH_MODE_WPA2_SAE;
+				u4AkmSuite = RSN_AKM_SUITE_SAE;
 				break;
 #endif
 			default:
@@ -2275,6 +2282,7 @@ int mtk_cfg80211_external_auth(struct wiphy *wiphy, struct net_device *ndev,
 			       struct cfg80211_external_auth_params *params)
 {
 	P_GLUE_INFO_T prGlueInfo = (P_GLUE_INFO_T) wiphy_priv(wiphy);
+	P_MSG_AIS_EXTERNAL_AUTH_T prExtAuthMsg;
 
 	if (!prGlueInfo)
 		return -EFAULT;
@@ -2284,7 +2292,22 @@ int mtk_cfg80211_external_auth(struct wiphy *wiphy, struct net_device *ndev,
 	       MAC2STR(params->bssid), params->status,
 	       params->key_mgmt_suite);
 
-	return -EOPNOTSUPP;
+	/* Hand the result to the AIS FSM on the main thread; it owns the
+	 * join state and the target STA record.
+	 */
+	prExtAuthMsg = (P_MSG_AIS_EXTERNAL_AUTH_T) cnmMemAlloc(prGlueInfo->prAdapter,
+							       RAM_TYPE_MSG,
+							       sizeof(MSG_AIS_EXTERNAL_AUTH_T));
+	if (!prExtAuthMsg)
+		return -ENOMEM;
+
+	prExtAuthMsg->rMsgHdr.eMsgId = MID_MNY_AIS_EXTERNAL_AUTH;
+	COPY_MAC_ADDR(prExtAuthMsg->aucBSSID, params->bssid);
+	prExtAuthMsg->u2StatusCode = params->status;
+
+	mboxSendMsg(prGlueInfo->prAdapter, MBOX_ID_0, (P_MSG_HDR_T) prExtAuthMsg, MSG_SEND_METHOD_BUF);
+
+	return 0;
 }
 
 int mtk_cfg80211_assoc(struct wiphy *wiphy, struct net_device *ndev, struct cfg80211_assoc_request *req)

@@ -242,6 +242,13 @@ typedef struct _AIS_FSM_INFO_T {
 	struct LINK_MGMT rBcnTimeout;
 	UINT_8 ucJoinFailCntAfterScan;
 	UINT_8 aucNeighborAPChnl[CFG_NEIGHBOR_AP_CHANNEL_NUM];
+
+	/* SAE external authentication: userspace runs the auth exchange while
+	 * AIS is parked in AIS_STATE_JOIN. fgIsSaeExternalAuth marks the live
+	 * exchange; ucSaeChExtCount bounds the channel-grant re-requests.
+	 */
+	BOOLEAN fgIsSaeExternalAuth;
+	UINT_8 ucSaeChExtCount;
 } AIS_FSM_INFO_T, *P_AIS_FSM_INFO_T;
 
 /*******************************************************************************
@@ -303,6 +310,8 @@ VOID aisFsmRunEventScanDone(IN P_ADAPTER_T prAdapter, IN P_MSG_HDR_T prMsgHdr);
 VOID aisFsmRunEventAbort(IN P_ADAPTER_T prAdapter, IN P_MSG_HDR_T prMsgHdr);
 
 VOID aisFsmRunEventJoinComplete(IN P_ADAPTER_T prAdapter, IN P_MSG_HDR_T prMsgHdr);
+
+VOID aisFsmRunEventExternalAuth(IN P_ADAPTER_T prAdapter, IN P_MSG_HDR_T prMsgHdr);
 
 enum _ENUM_AIS_STATE_T aisFsmJoinCompleteAction(IN struct _ADAPTER_T *prAdapter, IN struct _MSG_HDR_T *prMsgHdr);
 

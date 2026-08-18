@@ -3211,8 +3211,10 @@ static bool nl80211_valid_auth_type(struct cfg80211_registered_device *rdev,
 		return true;
 	case NL80211_CMD_CONNECT:
 	case NL80211_CMD_START_AP:
-		/* SAE not supported yet */
-		if (auth_type == NL80211_AUTHTYPE_SAE)
+		/* 3.18 backport: allow SAE connect only when the driver
+		 * advertises NL80211_FEATURE_SAE. */
+		if (auth_type == NL80211_AUTHTYPE_SAE &&
+		    !(rdev->wiphy.features & NL80211_FEATURE_SAE))
 			return false;
 		return true;
 	default:

@@ -1618,6 +1618,7 @@ wlanoidSetAuthMode(IN P_ADAPTER_T prAdapter,
 	case AUTH_MODE_WPA_PSK:
 	case AUTH_MODE_WPA2:
 	case AUTH_MODE_WPA2_PSK:
+	case AUTH_MODE_WPA2_SAE:
 		/* infrastructure mode only */
 		if (prAdapter->rWifiVar.rConnSettings.eOPMode != NET_TYPE_INFRA)
 			return WLAN_STATUS_NOT_ACCEPTED;
@@ -1668,6 +1669,10 @@ wlanoidSetAuthMode(IN P_ADAPTER_T prAdapter,
 
 	case AUTH_MODE_WPA2_PSK:
 		DBGLOG(RSN, TRACE, "New auth mode: WPA2 PSK\n");
+		break;
+
+	case AUTH_MODE_WPA2_SAE:
+		DBGLOG(RSN, TRACE, "New auth mode: WPA2 SAE\n");
 		break;
 
 	default:

@@ -505,6 +505,13 @@ WLAN_STATUS authCheckRxAuthFrameTransSeq(IN P_ADAPTER_T prAdapter, IN P_SW_RFB_T
 	if (prAdapter->rWifiVar.rAisFsmInfo.u4AisPacketFilter & PARAM_PACKET_FILTER_AUTH_FRAME)
 		kalIndicateRxMgmtFrame(prAdapter->prGlueInfo, prSwRfb);
 
+	/* While a userspace SAE exchange is live, auth frames belong to
+	 * userspace alone: the SAA/AAA dispatch is by transaction sequence
+	 * alone and would misfile SAE commit/confirm frames.
+	 */
+	if (prAdapter->rWifiVar.rAisFsmInfo.fgIsSaeExternalAuth)
+		return WLAN_STATUS_SUCCESS;
+
 	switch (u2RxTransactionSeqNum) {
 	case AUTH_TRANSACTION_SEQ_2:
 	case AUTH_TRANSACTION_SEQ_4:
