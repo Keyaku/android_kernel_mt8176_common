@@ -1728,6 +1728,9 @@ static void battery_update(struct battery_data *bat_data)
 {
 	struct power_supply *bat_psy = &bat_data->psy;
 	bool resetBatteryMeter = false;
+	/* Last values a uevent was sent for; see the notify gate at the end. */
+	static int prev_status, prev_health, prev_present, prev_capacity;
+	static bool first_update = true;
 
 	bat_data->BAT_TECHNOLOGY = POWER_SUPPLY_TECHNOLOGY_LION;
 	bat_data->BAT_HEALTH = POWER_SUPPLY_HEALTH_GOOD;
@@ -1784,7 +1787,22 @@ static void battery_update(struct battery_data *bat_data)
 	battery_log(BAT_LOG_FULL, "RTC_SOC=(%d)\n", get_rtc_spare_fg_value());
 
 	mt_battery_update_EM(bat_data);
-	power_supply_changed(bat_psy);
+
+	/* The gauge polls every BAT_TASK_PERIOD and usually only current_now
+	 * moves; notifying on that alone wakes healthd for nothing.
+	 */
+	if (first_update ||
+	    bat_data->BAT_STATUS != prev_status ||
+	    bat_data->BAT_HEALTH != prev_health ||
+	    bat_data->BAT_PRESENT != prev_present ||
+	    bat_data->BAT_CAPACITY != prev_capacity) {
+		first_update = false;
+		prev_status = bat_data->BAT_STATUS;
+		prev_health = bat_data->BAT_HEALTH;
+		prev_present = bat_data->BAT_PRESENT;
+		prev_capacity = bat_data->BAT_CAPACITY;
+		power_supply_changed(bat_psy);
+	}
 }
 
 #endif
