@@ -996,6 +996,10 @@ struct mt_cpu_dvfs {
 	/* limit for HEVC (via. sysfs) */
 	unsigned int limited_freq_by_hevc;
 
+	/* scaling_max/min_freq carried across a policy teardown, 0 = none */
+	unsigned int saved_policy_max;
+	unsigned int saved_policy_min;
+
 	/* for ramp down */
 	int ramp_down_count;
 	int ramp_down_count_const;
@@ -4443,6 +4447,18 @@ static int _mt_cpufreq_init(struct cpufreq_policy *policy)
 		policy->max = cpu_dvfs_get_max_freq(id_to_cpu_dvfs(id));
 		policy->min = cpu_dvfs_get_min_freq(id_to_cpu_dvfs(id));
 
+		/* A whole cluster going offline destroys its policy, and this
+		 * function then re-creates it at the hardware maximum, silently
+		 * dropping any scaling_max_freq a caller had set. Carry it over.
+		 */
+		if (p->saved_policy_max >= policy->cpuinfo.min_freq &&
+		    p->saved_policy_max <= policy->cpuinfo.max_freq)
+			policy->max = p->saved_policy_max;
+
+		if (p->saved_policy_min >= policy->cpuinfo.min_freq &&
+		    p->saved_policy_min <= policy->max)
+			policy->min = p->saved_policy_min;
+
 		if (_sync_opp_tbl_idx(p) >= 0)	/* sync p->idx_opp_tbl first before _restore_default_volt() */
 			p->idx_normal_max_opp = p->idx_opp_tbl;
 
@@ -4646,6 +4662,24 @@ static struct notifier_block _mt_cpufreq_fb_notifier = {
 };
 #endif				/* CONFIG_HAS_EARLYSUSPEND */
 
+static int _mt_cpufreq_exit(struct cpufreq_policy *policy)
+{
+	struct mt_cpu_dvfs *p;
+
+	FUNC_ENTER(FUNC_LV_MODULE);
+
+	p = id_to_cpu_dvfs(_get_cpu_dvfs_id(policy->cpu));
+
+	if (p) {
+		p->saved_policy_max = policy->max;
+		p->saved_policy_min = policy->min;
+	}
+
+	FUNC_EXIT(FUNC_LV_MODULE);
+
+	return 0;
+}
+
 static struct freq_attr *_mt_cpufreq_attr[] = {
 	&cpufreq_freq_attr_scaling_available_freqs,
 	NULL,
@@ -4655,6 +4689,7 @@ static struct cpufreq_driver _mt_cpufreq_driver = {
 	.verify = _mt_cpufreq_verify,
 	.target = _mt_cpufreq_target,
 	.init = _mt_cpufreq_init,
+	.exit = _mt_cpufreq_exit,
 	.get = _mt_cpufreq_get,
 	.name = "mt-cpufreq",
 	.attr = _mt_cpufreq_attr,
