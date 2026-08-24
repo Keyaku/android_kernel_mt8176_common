@@ -133,6 +133,13 @@ struct cpufreq_interactive_tunables {
 /* For cases where we have single governor instance for system */
 static struct cpufreq_interactive_tunables *common_tunables;
 
+/*
+ * Tunables kept across a policy teardown, indexed by the policy's first CPU.
+ * A whole cluster going offline destroys its policy and its tunables with it,
+ * and the values set for that cluster would otherwise come back as defaults.
+ */
+static struct cpufreq_interactive_tunables *cached_tunables[NR_CPUS];
+
 static struct attribute_group *get_sysfs_attr(void);
 
 static void cpufreq_interactive_timer_resched(
@@ -1177,6 +1184,27 @@ static int cpufreq_governor_interactive(struct cpufreq_policy *policy,
 	case CPUFREQ_GOV_POLICY_INIT:
 		if (have_governor_per_policy()) {
 			WARN_ON(tunables);
+
+			tunables = cached_tunables[cpumask_first(policy->related_cpus)];
+			if (tunables) {
+				tunables->usage_count = 1;
+				policy->governor_data = tunables;
+				rc = sysfs_create_group(
+					get_governor_parent_kobj(policy),
+					get_sysfs_attr());
+				if (rc) {
+					policy->governor_data = NULL;
+					return rc;
+				}
+				if (!policy->governor->initialized) {
+					idle_notifier_register(
+						&cpufreq_interactive_idle_nb);
+					cpufreq_register_notifier(
+						&cpufreq_notifier_block,
+						CPUFREQ_TRANSITION_NOTIFIER);
+				}
+				break;
+			}
 		} else if (tunables) {
 			tunables->usage_count++;
 			policy->governor_data = tunables;
@@ -1241,11 +1269,15 @@ static int cpufreq_governor_interactive(struct cpufreq_policy *policy,
 			sysfs_remove_group(get_governor_parent_kobj(policy),
 					get_sysfs_attr());
 
-			if (!have_governor_per_policy())
+			if (have_governor_per_policy()) {
+				/* keep the values for the next policy */
+				cached_tunables[cpumask_first(
+					policy->related_cpus)] = tunables;
+			} else {
 				cpufreq_put_global_kobject();
-
-			kfree(tunables);
-			common_tunables = NULL;
+				kfree(tunables);
+				common_tunables = NULL;
+			}
 		}
 
 		policy->governor_data = NULL;
