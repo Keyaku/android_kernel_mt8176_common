@@ -362,6 +362,7 @@ int mtk_cfg80211_get_station(struct wiphy *wiphy, struct net_device *ndev, const
 	WLAN_STATUS rStatus;
 	PARAM_MAC_ADDRESS arBssid;
 	UINT_32 u4BufLen, u4Rate = 0;
+	WLAN_STATUS rRateStatus = WLAN_STATUS_FAILURE; /* XDPLUS INSTRUMENTATION */
 	INT_32 i4Rssi;
 	PARAM_GET_STA_STA_STATISTICS rQueryStaStatistics;
 	UINT_32 u4TotalError;
@@ -389,6 +390,7 @@ int mtk_cfg80211_get_station(struct wiphy *wiphy, struct net_device *ndev, const
 	} else {
 		rStatus = kalIoctl(prGlueInfo,
 				   wlanoidQueryLinkSpeed, &u4Rate, sizeof(u4Rate), TRUE, FALSE, FALSE, &u4BufLen);
+		rRateStatus = rStatus; /* XDPLUS INSTRUMENTATION: rStatus is reused below */
 
 		sinfo->filled |= STATION_INFO_TX_BITRATE;
 
@@ -464,9 +466,10 @@ int mtk_cfg80211_get_station(struct wiphy *wiphy, struct net_device *ndev, const
 			 * we report today, against the per-STA statistics rate and its
 			 * phy-mode word. Both are in units of 0.5 Mbit/s.
 			 */
-			pr_info("[XDPLUS-RATE] linkq_raw=%u linkq_halfmbps=%u reported_100kbps=%u sta_halfmbps=%u sta_phymode=0x%08x per=%u rcpi=%u\n",
+			pr_info("[XDPLUS-RATE] rate_status=0x%08x linkq_raw=%u cache_100kbps=%u reported_100kbps=%u sta_halfmbps=%u sta_phymode=0x%08x per=%u rcpi=%u\n",
+				rRateStatus,
 				u4Rate,
-				u4Rate / 5000,
+				prGlueInfo->u4LinkSpeedCache,
 				sinfo->txrate.legacy,
 				rQueryStaStatistics.u2LinkSpeed,
 				rQueryStaStatistics.u4PhyMode,
