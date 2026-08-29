@@ -361,7 +361,7 @@ int mtk_cfg80211_get_station(struct wiphy *wiphy, struct net_device *ndev, const
 	P_GLUE_INFO_T prGlueInfo = NULL;
 	WLAN_STATUS rStatus;
 	PARAM_MAC_ADDRESS arBssid;
-	UINT_32 u4BufLen, u4Rate;
+	UINT_32 u4BufLen, u4Rate = 0;
 	INT_32 i4Rssi;
 	PARAM_GET_STA_STA_STATISTICS rQueryStaStatistics;
 	UINT_32 u4TotalError;
@@ -457,6 +457,21 @@ int mtk_cfg80211_get_station(struct wiphy *wiphy, struct net_device *ndev, const
 
 			u4TotalError = rQueryStaStatistics.u4TxFailCount + rQueryStaStatistics.u4TxLifeTimeoutCount;
 			prDevStats->tx_errors += u4TotalError;
+
+			/* XDPLUS INSTRUMENTATION -- REVERT BEFORE RELEASE.
+			 * Compares the two firmware rate sources reachable from this
+			 * one call: CMD_ID_GET_LINK_QUALITY's "TX rate1", which is what
+			 * we report today, against the per-STA statistics rate and its
+			 * phy-mode word. Both are in units of 0.5 Mbit/s.
+			 */
+			pr_info("[XDPLUS-RATE] linkq_raw=%u linkq_halfmbps=%u reported_100kbps=%u sta_halfmbps=%u sta_phymode=0x%08x per=%u rcpi=%u\n",
+				u4Rate,
+				u4Rate / 5000,
+				sinfo->txrate.legacy,
+				rQueryStaStatistics.u2LinkSpeed,
+				rQueryStaStatistics.u4PhyMode,
+				rQueryStaStatistics.ucPer,
+				rQueryStaStatistics.ucRcpi);
 		}
 		sinfo->filled |= STATION_INFO_TX_FAILED;
 		sinfo->tx_failed = prDevStats->tx_errors;
