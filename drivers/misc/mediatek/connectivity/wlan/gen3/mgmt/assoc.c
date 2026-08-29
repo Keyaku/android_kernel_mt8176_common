@@ -774,8 +774,12 @@ assocCheckRxReAssocRspFrameStatus(IN P_ADAPTER_T prAdapter, IN P_SW_RFB_T prSwRf
 	if (u2RxStatusCode == STATUS_CODE_SUCCESSFUL) {
 		/* Update the information in the structure used to query and set
 		   OID_802_11_ASSOCIATION_INFORMATION. */
+		/* Frame BODY length: u2PacketLen counts the MAC header too, and the
+		 * pointer already starts at the body. Same arithmetic as the guard above.
+		 */
 		kalUpdateReAssocRspInfo(prAdapter->prGlueInfo,
-					(PUINT_8)&prAssocRspFrame->u2CapInfo, (UINT_32) (prSwRfb->u2PacketLen));
+					(PUINT_8)&prAssocRspFrame->u2CapInfo,
+					(UINT_32) (prSwRfb->u2PacketLen - prSwRfb->u2HeaderLen));
 
 		/* 4 <5> Update CAP_INFO and ASSOC_ID */
 		prStaRec->u2CapInfo = u2RxCapInfo;
