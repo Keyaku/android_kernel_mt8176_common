@@ -3560,20 +3560,6 @@ VOID nicUpdateLinkQuality(IN P_ADAPTER_T prAdapter, IN UINT_8 ucBssIndex, IN P_E
 	ASSERT(ucBssIndex <= MAX_BSS_INDEX);
 	ASSERT(prEventLinkQuality);
 
-	/* XDPLUS INSTRUMENTATION -- REVERT BEFORE RELEASE.
-	 * ucMediumBusyPercentage is the only channel-utilisation figure this stack
-	 * has, and nothing reads it. Logged beside the rate and RSSI so a low rate
-	 * can be attributed to a busy channel or not. Note it is READ-CLEAR in
-	 * firmware, so each value covers the interval since the previous query.
-	 */
-	if (GET_BSS_INFO_BY_INDEX(prAdapter, ucBssIndex)->eNetworkType == NETWORK_TYPE_AIS)
-		pr_info("[XDPLUS-CHAN] bss=%u rssi=%d lq=%d rate_halfmbps=%u medium_busy_pct=%u\n",
-			ucBssIndex,
-			prEventLinkQuality->rLq[ucBssIndex].cRssi,
-			prEventLinkQuality->rLq[ucBssIndex].cLinkQuality,
-			prEventLinkQuality->rLq[ucBssIndex].u2LinkSpeed,
-			prEventLinkQuality->rLq[ucBssIndex].ucMediumBusyPercentage);
-
 	switch (GET_BSS_INFO_BY_INDEX(prAdapter, ucBssIndex)->eNetworkType) {
 	case NETWORK_TYPE_AIS:
 		if (GET_BSS_INFO_BY_INDEX(prAdapter, ucBssIndex)->eConnectionState == PARAM_MEDIA_STATE_CONNECTED) {
