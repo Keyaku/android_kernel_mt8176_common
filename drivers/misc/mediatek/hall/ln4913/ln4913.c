@@ -69,9 +69,12 @@ void hall_get_gpio_infor(void)
 	
 static void hall_eint_work_callback(struct work_struct *work)
 {
-	/* The edge toggle, not a pin read: this hall line does not hold a level
-	 * at rest, so sampling it outside the edge does not describe the lid. */
-	int closed = (g_cur_eint_state == HALL_EINT_PIN_PLUG_OPEN);
+	/* The pin is the truth: it sits high with the lid open and low when shut,
+	 * so a read here self-corrects a toggle that drifted on a missed edge. */
+	int closed;
+
+	GPIO_HALL_INT_VALUE = __gpio_get_value(GPIO_HALL_INT_NUM);
+	closed = (GPIO_HALL_INT_VALUE == 0);
 
 	switch_set_state((struct switch_dev *)&ln4913_data, closed ? STATE_NEAR : STATE_FAR);
 	HALL_DEBUG("[ln4913] hall %s\n", closed ? "close" : "open");
@@ -189,6 +192,9 @@ static int ln4913_probe(struct platform_device *dev)
 	#endif
 	hall_get_gpio_infor();
 	ln4913_setup_eint();
+	/* setup_eint() requests the pin as an output before turning it into an
+	 * input, so the value sampled above is not the lid. Re-read it. */
+	hall_get_gpio_infor();
 	ln4913_data.name = "hall";
 	ln4913_data.index = 0;
 	ln4913_data.state = STATE_FAR;	
@@ -198,10 +204,11 @@ static int ln4913_probe(struct platform_device *dev)
 		HALL_DEBUG("[ln4913]switch_dev_register returned:%d!\n", r);
 		return r;
 	}
-	switch_set_state((struct switch_dev *)&ln4913_data, STATE_FAR);
-	/* EventHub reads the switch once at start-up, so give it a defined value:
-	 * open, which is also where the edge toggle starts. */
-	input_report_switch(hall_input_dev, SW_LID, 0);
+	/* Seed from the pin, so a device that boots with the lid already shut is
+	 * not reported open by EventHub's start-up read. */
+	switch_set_state((struct switch_dev *)&ln4913_data,
+			 GPIO_HALL_INT_VALUE ? STATE_FAR : STATE_NEAR);
+	input_report_switch(hall_input_dev, SW_LID, GPIO_HALL_INT_VALUE == 0);
 	input_sync(hall_input_dev);
 	hall_eint_workqueue = create_singlethread_workqueue("hall_eint");
 	INIT_WORK(&hall_eint_work, hall_eint_work_callback);
