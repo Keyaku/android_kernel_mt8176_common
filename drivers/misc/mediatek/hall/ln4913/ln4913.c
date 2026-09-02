@@ -69,31 +69,23 @@ void hall_get_gpio_infor(void)
 	
 static void hall_eint_work_callback(struct work_struct *work)
 {
-	if(g_cur_eint_state ==  HALL_EINT_PIN_PLUG_OPEN ) 
-	{
-		switch_set_state((struct switch_dev *)&ln4913_data, STATE_NEAR);
-		HALL_DEBUG("[ln4913] hall close\n");
-	}	
-	else
-	{
-		switch_set_state((struct switch_dev *)&ln4913_data, STATE_FAR);
-		HALL_DEBUG("[ln4913] hall open\n");
-	}	
-	printk("wisky_hall: enter \n");
+	int closed;
+
+	/* Trust the pin, not the software edge toggle: a missed or spurious edge
+	 * used to invert the reported state until the next transition. */
+	GPIO_HALL_INT_VALUE = __gpio_get_value(GPIO_HALL_INT_NUM);
+	closed = (GPIO_HALL_INT_VALUE == 0);
+
+	switch_set_state((struct switch_dev *)&ln4913_data, closed ? STATE_NEAR : STATE_FAR);
+	HALL_DEBUG("[ln4913] hall %s\n", closed ? "close" : "open");
+
 	if (sys_boot_mode != FACTORY_BOOT)
 	{
-		//熄屏且远离  亮屏且靠近
-		//GPIO_HALL_INT_VALUE = 1;//远离
-		//GPIO_HALL_INT_VALUE = 0;//靠近
-		GPIO_HALL_INT_VALUE = __gpio_get_value(GPIO_HALL_INT_NUM);
-		printk("wisky_hall: g_is_suspend = %d, GPIO_HALL_INT_VALUE = %d\n", g_is_suspend, GPIO_HALL_INT_VALUE);
-		if ((g_is_suspend == 0 && GPIO_HALL_INT_VALUE == 0) || (g_is_suspend == 1 && GPIO_HALL_INT_VALUE == 1))
-		{
-			input_report_key(hall_input_dev, KEY_POWER, 1);//按下
-			input_sync(hall_input_dev);
-			input_report_key(hall_input_dev, KEY_POWER, 0);//弹起
-			input_sync(hall_input_dev);
-		}	
+		/* Android's SW_LID is inverted from this pin: 1 means shut. The lid
+		 * used to fake KEY_POWER here, which was indistinguishable from the
+		 * real button and fired only on some transitions. */
+		input_report_switch(hall_input_dev, SW_LID, closed);
+		input_sync(hall_input_dev);
 	}
 	enable_irq(hall_irq);
 }
@@ -171,8 +163,10 @@ static int ln4913_probe(struct platform_device *dev)
 		return -ENOMEM;
 	
 	hall_input_dev->name = HALL_SENSOR_NAME;
-	__set_bit(EV_KEY, hall_input_dev->evbit);
-	input_set_capability(hall_input_dev, EV_KEY, KEY_POWER);
+	/* A switch, not a key: Android drives its lid policy from SW_LID and can
+	 * then tell a lid close apart from a power press. */
+	__set_bit(EV_SW, hall_input_dev->evbit);
+	__set_bit(SW_LID, hall_input_dev->swbit);
 	r = input_register_device(hall_input_dev);
 	if (r) {
 		printk("hall sensor register input device failed (%d)\n", r);
@@ -207,7 +201,12 @@ static int ln4913_probe(struct platform_device *dev)
 		HALL_DEBUG("[ln4913]switch_dev_register returned:%d!\n", r);
 		return r;
 	}
-	switch_set_state((struct switch_dev *)&ln4913_data, STATE_FAR);
+	/* Seed from the pin: EventHub reads the switch once at start-up, so a
+	 * device booted with the lid shut must not report itself open. */
+	switch_set_state((struct switch_dev *)&ln4913_data,
+			 GPIO_HALL_INT_VALUE ? STATE_FAR : STATE_NEAR);
+	input_report_switch(hall_input_dev, SW_LID, GPIO_HALL_INT_VALUE == 0);
+	input_sync(hall_input_dev);
 	hall_eint_workqueue = create_singlethread_workqueue("hall_eint");
 	INIT_WORK(&hall_eint_work, hall_eint_work_callback);
 	device_init_wakeup(&dev->dev, 1);	
