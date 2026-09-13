@@ -64,6 +64,7 @@ static const char *szHdmiResStr[HDMI_VIDEO_RESOLUTION_NUM] = {
 	"RES_2160P_29_97HZ",
 	"RES_2160P_30HZ",
 	"RES_2161P_24HZ",
+	"RES_2160P_60HZ",
 
 };
 
@@ -736,7 +737,8 @@ unsigned char bResolution_4K2K(unsigned char bResIndex)
 {
 	if ((bResIndex == HDMI_VIDEO_2160P_23_976HZ) || (bResIndex == HDMI_VIDEO_2160P_24HZ)
 	    || (bResIndex == HDMI_VIDEO_2160P_25HZ) || (bResIndex == HDMI_VIDEO_2160P_29_97HZ)
-	    || (bResIndex == HDMI_VIDEO_2160P_30HZ) || (bResIndex == HDMI_VIDEO_2161P_24HZ))
+	    || (bResIndex == HDMI_VIDEO_2160P_30HZ) || (bResIndex == HDMI_VIDEO_2161P_24HZ)
+	    || (bResIndex == HDMI_VIDEO_2160P_60HZ))
 		return TRUE;
 	else
 		return FALSE;
@@ -778,7 +780,14 @@ void vSetHDMITxPLL(unsigned char bResIndex, unsigned char bdeepmode)
 
 	if (bResolution_4K2K(bResIndex)) {
 		u4Feq = 2;	/* 148M */
-		bdeepmode = HDMI_DEEP_COLOR_16_BIT;
+		/* 4K30 reaches 297 Mcsc by doubling this clock with 16-bit deep
+		 * colour. 4K60 carries 594 Mcsc on the 1/40 ratio instead, so it
+		 * must stay at 8-bit or the clock doubles a second time.
+		 */
+		if (bResIndex == HDMI_VIDEO_2160P_60HZ)
+			bdeepmode = HDMI_NO_DEEP_COLOR;
+		else
+			bdeepmode = HDMI_DEEP_COLOR_16_BIT;
 	}
 
 	vWriteIoPllMsk(HDMI_CON0, ((PREDIV[u4Feq][bdeepmode - 1]) << PREDIV_SHIFT),
@@ -3805,7 +3814,19 @@ void vChgHDMI2VideoResolution(unsigned char ui1resindex, unsigned char ui1colors
 	/* vHalSendSPDInfoFrame(&_bSpdInf[0]); */
 	vSend_AVUNMUTE2();
 
-	if (_HdmiSinkAvCap.b_sink_LTE_340M_sramble == TRUE) {
+	/* SCDC TMDS_Config: bit0 enables scrambling, bit1 selects the 1/40 bit-clock
+	 * ratio. Above 340 Mcsc the sink needs both, and the stock code only ever set
+	 * bit0 -- it implemented the low-rate half of 2.0 and nothing above it.
+	 */
+	if (ui1resindex == HDMI_VIDEO_2160P_60HZ) {
+		if (_HdmiSinkAvCap.b_sink_SCDC_present == TRUE) {
+			vSendTMDSConfiguration(0x3);
+			mdelay(100);
+			vWriteHdmiGRLMsk(TOP_CFG00, SCR_ON | HDMI2_ON, SCR_ON | HDMI2_ON);
+		} else {
+			pr_err("[HDMI]sink has no SCDC; 4K60 cannot be signalled\n");
+		}
+	} else if (_HdmiSinkAvCap.b_sink_LTE_340M_sramble == TRUE) {
 		vSendTMDSConfiguration(TRUE);
 		mdelay(100);
 		vWriteHdmiGRLMsk(TOP_CFG00, SCR_ON | HDMI2_ON, SCR_ON | HDMI2_ON);

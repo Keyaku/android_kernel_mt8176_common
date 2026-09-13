@@ -50,6 +50,11 @@ typedef enum {
 	/*the 2161 mean 4096x2160 */
 	HDMI_VIDEO_2161P_24HZ,	/* 18 */
 
+	/* 4K60: CEA VIC 97. Above 340 Mcsc, so it needs HDMI 2.0 scrambling and
+	 * the 1/40 bit-clock ratio, not the deep-colour trick 4K30 uses.
+	 */
+	HDMI_VIDEO_2160P_60HZ,	/* 19 */
+
 
 	HDMI_VIDEO_RESOLUTION_NUM
 } HDMI_VIDEO_RESOLUTION;

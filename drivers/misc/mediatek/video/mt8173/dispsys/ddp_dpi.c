@@ -255,6 +255,7 @@ DPI_STATUS ddp_dpi_ConfigPclk(DISP_MODULE_ENUM module, cmdqRecHandle cmdq, unsig
 	case DPI_VIDEO_2160P_25HZ:	/* 297m pixel clock */
 	case DPI_VIDEO_2160P_30HZ:	/* 297m pixel clock */
 	case DPI_VIDEO_2161P_24HZ:	/* 297m pixel clock */
+	case DPI_VIDEO_2160P_60HZ:	/* 594m pixel clock, DDR output */
 		bPix = 594000000 * 3;
 		break;
 	}
@@ -278,7 +279,8 @@ DPI_STATUS ddp_dpi_ConfigPclk(DISP_MODULE_ENUM module, cmdqRecHandle cmdq, unsig
 	    (DPI_VIDEO_2160P_24HZ == clk_req) ||
 	    (DPI_VIDEO_2160P_25HZ == clk_req) ||
 	    (DPI_VIDEO_2160P_29_97HZ == clk_req) ||
-	    (DPI_VIDEO_2160P_30HZ == clk_req) || (DPI_VIDEO_2161P_24HZ == clk_req)) {
+	    (DPI_VIDEO_2160P_30HZ == clk_req) || (DPI_VIDEO_2161P_24HZ == clk_req) ||
+	    (DPI_VIDEO_2160P_60HZ == clk_req)) {
 		u4Feq = 3;	/* 297M no deepcolor */
 	}
 
