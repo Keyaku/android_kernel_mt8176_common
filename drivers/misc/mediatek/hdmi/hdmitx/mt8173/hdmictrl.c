@@ -2459,6 +2459,8 @@ void vSendVendorSpecificInfoFrame(unsigned char ui1resindex)
 
 }
 
+void vSendTMDSConfiguration(unsigned char enscramble);
+
 void vChgHDMIVideoResolution(unsigned char ui1resindex, unsigned char ui1colorspace,
 			     unsigned char ui1hdmifs, unsigned char bdeepmode)
 {
@@ -2467,6 +2469,15 @@ void vChgHDMIVideoResolution(unsigned char ui1resindex, unsigned char ui1colorsp
 	HDMI_VIDEO_FUNC();
 
 	vHDMIAVMute();
+	/* A 2.0 session leaves the scrambler on in both the sink and TOP_CFG00,
+	 * and nothing else ever turns it off: a following 1.4 mode goes out
+	 * scrambled to a receiver no longer expecting it.
+	 */
+	if (_HdmiSinkAvCap.b_sink_SCDC_present == TRUE) {
+		vSendTMDSConfiguration(0);
+		mdelay(20);
+	}
+	vWriteHdmiGRLMsk(TOP_CFG00, 0, SCR_ON | HDMI2_ON);
 	vHDMIResetGenReg(ui1resindex, ui1colorspace);
 	vChgHDMIAudioOutput(ui1hdmifs, ui1resindex, bdeepmode);
 
