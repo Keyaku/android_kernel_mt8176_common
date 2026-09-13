@@ -210,7 +210,8 @@ int flag_resolution_4k(HDMI_VIDEO_RESOLUTION resolution)
 	    (resolution == HDMI_VIDEO_2160P_25HZ) ||
 	    (resolution == HDMI_VIDEO_2160P_29_97HZ) ||
 	    (resolution == HDMI_VIDEO_2160P_30HZ) ||
-	    (resolution == HDMI_VIDEO_2161P_24HZ))
+	    (resolution == HDMI_VIDEO_2161P_24HZ) ||
+	    (resolution == HDMI_VIDEO_2160P_60HZ))
 		return true;
 	else
 		return false;
@@ -227,6 +228,7 @@ int flag_resolution_fps(HDMI_VIDEO_RESOLUTION resolution)
 	case HDMI_VIDEO_1920x1080p_60Hz:
 	case HDMI_VIDEO_1280x720p3d_60Hz:
 	case HDMI_VIDEO_1920x1080i3d_60Hz:
+	case HDMI_VIDEO_2160P_60HZ:
 		fps = 60;
 		break;
 
@@ -1551,6 +1553,31 @@ void dpi_setting_res(u8 arg)
 			p->hdmi_height = 2160 - p->bg_height;
 
 			p->output_video_resolution = HDMI_VIDEO_2160P_30HZ;
+			break;
+		}
+
+	case HDMI_VIDEO_2160P_60HZ:
+		{
+			clk_pol = HDMI_POLARITY_RISING;
+			de_pol = HDMI_POLARITY_RISING;
+			hsync_pol = HDMI_POLARITY_FALLING;
+			vsync_pol = HDMI_POLARITY_FALLING;
+
+			/* Same totals as 4K30 -- 4400 x 2250 -- at twice the rate. */
+			hsync_pulse_width = 88;
+			hsync_back_porch = 296;
+			hsync_front_porch = 176;
+
+			vsync_pulse_width = 10;
+			vsync_back_porch = 72;
+			vsync_front_porch = 8;
+
+			p->bg_height = ((2160 * p->scaling_factor) / 100 >> 2) << 2;
+			p->bg_width = ((3840 * p->scaling_factor) / 100 >> 2) << 2;
+			p->hdmi_width = 3840 - p->bg_width;
+			p->hdmi_height = 2160 - p->bg_height;
+
+			p->output_video_resolution = HDMI_VIDEO_2160P_60HZ;
 			break;
 		}
 
