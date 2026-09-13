@@ -18,6 +18,7 @@
 #include "hdmictrl.h"
 #include "hdmi_ctrl.h"
 #include "hdmihdcp.h"
+#include "hdmiddc.h"
 #include "hdmiedid.h"
 #include "hdmicec.h"
 /* #include <mach/mt_boot_common.h> */
@@ -2251,7 +2252,9 @@ void vSendAVIInfoFrame(unsigned char ui1resindex, unsigned char ui1colorspace)
 	else
 		_bAviInfoFm[0] = 0x00;
 
-	if (bResolution_4K2K(ui1resindex) && !bResolution_4K2K_Low_Field_Rate(ui1resindex))
+	/* Y1Y0=11 is 4:2:0; 4K60 here is 4:4:4 at 594 Mcsc, so keep the real colour space. */
+	if (bResolution_4K2K(ui1resindex) && !bResolution_4K2K_Low_Field_Rate(ui1resindex)
+	    && ui1resindex != HDMI_VIDEO_2160P_60HZ)
 		_bAviInfoFm[0] = 0x60;
 
 	if (!bResolution_4K2K(ui1resindex))
@@ -2290,11 +2293,11 @@ void vSendAVIInfoFrame(unsigned char ui1resindex, unsigned char ui1colorspace)
 			_bAviInfoFm[2] |= 0x08;	/* FULL Range */
 	}
 
-	if (bResolution_4K2K(ui1resindex)) {
+	if (bResolution_4K2K(ui1resindex) && ui1resindex != HDMI_VIDEO_2160P_60HZ) {
 		if (bResolution_4K2K_Low_Field_Rate(ui1resindex))
 			_bAviInfoFm[3] = 0;	/* bData4 */
 	} else
-		_bAviInfoFm[3] = HDMI_VIDEO_ID_CODE[ui1resindex];	/* bData4 */
+		_bAviInfoFm[3] = HDMI_VIDEO_ID_CODE[ui1resindex];	/* bData4: 4K60 is CEA VIC 97 */
 
 	if ((_bAviInfoFm[1] & AV_INFO_16_9_OUTPUT)
 	    && ((ui1resindex == HDMI_VIDEO_720x480p_60Hz)
@@ -2781,7 +2784,15 @@ void hdmi_hdmistatus(void)
 	/*vShowHdcpRawData();*/
 
 	vCheckHDMICLKPIN();
-
+	/* SCDC 0x20 = TMDS_Config we wrote, 0x21 = the sink's scrambler lock. */
+	{
+		unsigned char scdc[2] = { 0, 0 };
+		if (fgDDCDataRead(RX_REG_SCRAMBLE >> 1, RX_REG_TMDS_CONFIG, 2, scdc))
+			pr_err("[HDMI]SCDC tmds_config=0x%02x scrambler_status=0x%02x\n",
+			       scdc[0], scdc[1]);
+		else
+			pr_err("[HDMI]SCDC read failed\n");
+	}
 }
 
 unsigned int hdmi_check_status(void)
@@ -3605,7 +3616,9 @@ void vSendAVI2InfoFrame(unsigned char ui1resindex, unsigned char ui1colorspace)
 	else
 		_bAviInfoFm[0] = 0x00;
 
-	if (bResolution_4K2K(ui1resindex) && !bResolution_4K2K_Low_Field_Rate(ui1resindex))
+	/* Y1Y0=11 is 4:2:0; 4K60 here is 4:4:4 at 594 Mcsc, so keep the real colour space. */
+	if (bResolution_4K2K(ui1resindex) && !bResolution_4K2K_Low_Field_Rate(ui1resindex)
+	    && ui1resindex != HDMI_VIDEO_2160P_60HZ)
 		_bAviInfoFm[0] = 0x60;
 
 	if (!bResolution_4K2K(ui1resindex))
@@ -3643,12 +3656,12 @@ void vSendAVI2InfoFrame(unsigned char ui1resindex, unsigned char ui1colorspace)
 		else if (ui1colorspace == HDMI_RGB_FULL)
 			_bAviInfoFm[2] |= 0x08; /* FULL Range */
 	}
-	if (bResolution_4K2K(ui1resindex)) {
+	if (bResolution_4K2K(ui1resindex) && ui1resindex != HDMI_VIDEO_2160P_60HZ) {
 		if (bResolution_4K2K_Low_Field_Rate(ui1resindex))
 			_bAviInfoFm[3] = 0; /* bData4 */
 	}
 	else
-		_bAviInfoFm[3] = HDMI_VIDEO_ID_CODE[ui1resindex];	/* bData4 */
+		_bAviInfoFm[3] = HDMI_VIDEO_ID_CODE[ui1resindex];	/* bData4: 4K60 is CEA VIC 97 */
 
 	if ((_bAviInfoFm[1] & AV_INFO_16_9_OUTPUT)
 		&& ((ui1resindex == HDMI_VIDEO_720x480p_60Hz)
