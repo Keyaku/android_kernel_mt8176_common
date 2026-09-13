@@ -45,6 +45,12 @@
 /* Retry interval for retransmiting association-request MMPDU. */
 #define TX_ASSOCIATION_RETRY_TIMEOUT_TU             100	/* TU. */
 
+/* 802.11w association comeback. The wait happens inside a single channel grant,
+ * so both bounds are sized to stay well inside one.
+ */
+#define ASSOC_COMEBACK_MAX_MSEC                     1500
+#define ASSOC_COMEBACK_RETRY_LIMIT                  2
+
 /* Wait for a response to a transmitted authentication-request MMPDU. */
 #define DOT11_AUTHENTICATION_RESPONSE_TIMEOUT_TU    512	/* TU. */
 
@@ -121,6 +127,8 @@ WLAN_STATUS
 saaFsmRunEventTxDone(IN P_ADAPTER_T prAdapter, IN P_MSDU_INFO_T prMsduInfo, IN ENUM_TX_RESULT_CODE_T rTxDoneStatus);
 
 VOID saaFsmRunEventTxReqTimeOut(IN P_ADAPTER_T prAdapter, IN ULONG plParamPtr);
+
+VOID saaFsmRunEventAssocComeback(IN P_ADAPTER_T prAdapter, IN ULONG ulParamPtr);
 
 VOID saaFsmRunEventRxRespTimeOut(IN P_ADAPTER_T prAdapter, IN ULONG ulParamPtr);
 

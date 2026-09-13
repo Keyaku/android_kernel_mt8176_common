@@ -830,10 +830,12 @@ assocCheckRxReAssocRspFrameStatus(IN P_ADAPTER_T prAdapter, IN P_SW_RFB_T prSwRf
 					DBGLOG(SAA, INFO,
 					       "AP reject association temporarily, comeback duration %u TU (%u ms)\n",
 					       tu, TU_TO_MSEC(tu));
-					if (tu > TX_ASSOCIATION_RETRY_TIMEOUT_TU) {
-						/* DBGLOG(SAA, INFO, "Update timer based on comeback duration\n"); */
-						/* ieee80211_reschedule_timer(wpa_s, ms); */
-					}
+					/* Retrying before the AP's SA Query has timed
+					 * out only earns the same rejection again.
+					 */
+					prStaRec->u4AssocComebackMs = TU_TO_MSEC(tu);
+					if (prStaRec->u4AssocComebackMs > ASSOC_COMEBACK_MAX_MSEC)
+						prStaRec->u4AssocComebackMs = ASSOC_COMEBACK_MAX_MSEC;
 				}
 				break;
 			}

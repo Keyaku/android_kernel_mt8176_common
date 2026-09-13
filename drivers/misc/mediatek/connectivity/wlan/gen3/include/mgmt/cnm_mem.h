@@ -270,6 +270,12 @@ struct _STA_RECORD_T {
 	UINT_8 ucTxAuthAssocRetryCount;	/* For Infra Mode, the Retry Count of TX Auth/Assod Frame(SAA) */
 	UINT_8 ucTxAuthAssocRetryLimit;	/* For Infra Mode, the Retry Limit of TX Auth/Assod Frame(SAA) */
 
+	/* 802.11w association comeback: the delay the AP asked for in a status-30
+	 * rejection, and how many times it has been honoured for this join.
+	 */
+	UINT_32 u4AssocComebackMs;
+	UINT_8 ucAssocComebackCount;
+
 	UINT_16 u2StatusCode;	/* Status of Auth/Assoc Req */
 	UINT_16 u2ReasonCode;	/* Reason that been Deauth/Disassoc */
 
