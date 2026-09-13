@@ -3642,6 +3642,23 @@ VOID aisFsmRunEventJoinTimeout(IN P_ADAPTER_T prAdapter, ULONG ulParamPtr)
 		aisAddBlacklist(prAdapter, prAisFsmInfo->prTargetBssDesc);
 		prAisFsmInfo->prTargetStaRec->ucJoinFailureCount++;
 
+		/* BSS selection gates on the descriptor's count, not the STA record's,
+		 * and the STA record does not survive to the next attempt. Without this
+		 * a BSS that only ever times out stays eligible for ever.
+		 */
+		if (prAisFsmInfo->prTargetBssDesc) {
+			P_BSS_DESC_T prTargetBssDesc = prAisFsmInfo->prTargetBssDesc;
+
+			prTargetBssDesc->ucJoinFailureCount++;
+			if (prTargetBssDesc->ucJoinFailureCount >= SCN_BSS_JOIN_FAIL_THRESOLD) {
+				GET_CURRENT_SYSTIME(&prTargetBssDesc->rJoinFailTime);
+				DBGLOG(AIS, INFO,
+				       "Bss " MACSTR " join timeout %u times, temp disable it\n",
+				       MAC2STR(prTargetBssDesc->aucBSSID),
+				       prTargetBssDesc->ucJoinFailureCount);
+			}
+		}
+
 		if (prAisFsmInfo->prTargetStaRec->ucJoinFailureCount < JOIN_MAX_RETRY_FAILURE_COUNT) {
 			/* 3.1 Retreat to AIS_STATE_SEARCH state for next try */
 			eNextState = AIS_STATE_SEARCH;
