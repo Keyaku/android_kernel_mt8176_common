@@ -1030,7 +1030,10 @@ rlmDomainIsValidRfSetting(P_ADAPTER_T prAdapter,
 			  ENUM_CHNL_EXT_T eExtend,
 			  ENUM_CHANNEL_WIDTH_T eChannelWidth, UINT_8 ucChannelS1, UINT_8 ucChannelS2)
 {
-	UINT_8	ucCenterChannel;
+	/* Set in every width branch the callers use; initialised so an unhandled
+	 * width cannot reach the 80 MHz offset maths with a garbage channel.
+	 */
+	UINT_8	ucCenterChannel = 0;
 	UINT_8  ucUpperChannel;
 	UINT_8  ucLowerChannel;
 	BOOLEAN fgValidChannel = TRUE;
