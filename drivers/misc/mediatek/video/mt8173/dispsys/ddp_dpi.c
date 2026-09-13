@@ -737,6 +737,18 @@ int ddp_dpi_config(DISP_MODULE_ENUM module, disp_ddp_path_config *config, void *
 							  dpi_config->vsync_front_porch,
 							  Is_interlace_resolution
 							  (dpi_config->dpi_clock));
+				/* 4K60 needs 594 Mpixel/s from a 297 MHz DPI clock:
+				 * two pixels per clock (DDR). Every other mode is SDR.
+				 */
+				if (dpi_config->dpi_clock == DPI_VIDEO_2160P_60HZ) {
+					ddp_dpi_ConfigDualEdge(module, cmdq_handle, true, 0);
+				} else {
+					DPI_OUTREGBIT(cmdq_handle, DPI_REG_OUTPUT_SETTING,
+						      DPI_REG[DPI_IDX(module)]->OUTPUT_SETTING,
+						      DUAL_EDGE_SEL, 0);
+					DPI_OUTREGBIT(cmdq_handle, DPI_REG_DDR_SETTING,
+						      DPI_REG[DPI_IDX(module)]->DDR_SETTING, DDR_EN, 0);
+				}
 			}
 			break;
 
