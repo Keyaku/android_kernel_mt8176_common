@@ -1319,6 +1319,10 @@ VOID rsnGenerateRSNIE(IN P_ADAPTER_T prAdapter, IN P_MSDU_INFO_T prMsduInfo)
 				kalMemCopy(cp,
 					   (PVOID) prAdapter->rWifiVar.rAisSpecificBssInfo.
 					   arPmkidCache[u4Entry].rBssidInfo.arPMKID, sizeof(PARAM_PMKID_VALUE));
+				/* Without this the group-management cipher below is
+				 * written over the PMKID, and the AP rejects the RSNE.
+				 */
+				cp += sizeof(PARAM_PMKID_VALUE);
 				/* ucExpendedLen = 40; */
 			} else {
 				WLAN_SET_FIELD_16(cp, 0);	/* PMKID count */
