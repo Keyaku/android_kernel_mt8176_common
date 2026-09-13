@@ -27,6 +27,9 @@
 /*#include "extd_drv.h"*/
 #if defined(CONFIG_MTK_INTERNAL_HDMI_SUPPORT)
 #include "internal_hdmi_drv.h"
+
+/* Lives in the HDMI TX driver; 1 forces HDMI 2.0, 2 forces 1.4. */
+extern unsigned char hdmi2_force_output;
 #elif defined(CONFIG_MTK_INTERNAL_MHL_SUPPORT)
 #include "inter_mhl_drv.h"
 #include "mhl_dbg.h"
@@ -56,7 +59,8 @@ static char STR_HELP[] =
 	"\n"
 	"USAGE\n"
 	"        echo [ACTION]... > hdmi\n"
-	"\n" "ACTION\n" "        hdmitx:[on|off]\n" "             enable hdmi video output\n" "\n";
+	"\n" "ACTION\n" "        hdmitx:[on|off]\n" "             enable hdmi video output\n"
+	"        hdmi2:[1|2]\n" "             1 forces HDMI 2.0, 2 forces 1.4; applies on the next hotplug\n" "\n";
 
 /* TODO: this is a temp debug solution */
 static void process_dbg_opt(const char *opt)
@@ -84,6 +88,18 @@ static void process_dbg_opt(const char *opt)
 		else if (0 == strncmp(opt + 4, "off", 3))
 			hdmi_log_enable(false);
 		else
+			goto Error;
+
+	} else if (0 == strncmp(opt, "hdmi2:", 6)) {
+		/* The 2.0 path is compiled in but pinned off by a constant nothing
+		 * writes. Settable so a sink can be A/B'd without a reflash.
+		 */
+		unsigned char v = *(opt + 6) - '0';
+
+		if (v == 1 || v == 2) {
+			hdmi2_force_output = v;
+			pr_err("[hdmitx] hdmi2_force_output=%d, applies on the next hotplug\n", v);
+		} else
 			goto Error;
 
 	} else if (0 == strncmp(opt, "fakecablein:", 12)) {
