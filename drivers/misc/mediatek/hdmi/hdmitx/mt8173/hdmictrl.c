@@ -782,8 +782,8 @@ void vSetHDMITxPLL(unsigned char bResIndex, unsigned char bdeepmode)
 	if (bResolution_4K2K(bResIndex)) {
 		u4Feq = 2;	/* 148M */
 		/* 4K30 reaches 297 Mcsc by doubling this clock with 16-bit deep
-		 * colour. 4K60 carries 594 Mcsc on the 1/40 ratio instead, so it
-		 * must stay at 8-bit or the clock doubles a second time.
+		 * colour. 4K60 declares the 1/40 ratio to the sink and keeps the
+		 * slow column; the fast column only moved the clock lane to 297 M.
 		 */
 		if (bResIndex == HDMI_VIDEO_2160P_60HZ)
 			bdeepmode = HDMI_NO_DEEP_COLOR;
@@ -2769,6 +2769,17 @@ void vCheckHDMICLKPIN(void)
 
 }
 
+static unsigned char bReadScdcReg(unsigned char reg)
+{
+	vWriteByteHdmiGRL(DDC_CTRL,
+			  (SEQ_READ_NO_ACK << DDC_CMD_SHIFT) + (1 << DDC_DIN_CNT_SHIFT) +
+			  (reg << DDC_OFFSET_SHIFT) + RX_REG_SCRAMBLE);
+	mdelay(2);
+	vWriteByteHdmiGRL(SI2C_CTRL, (SI2C_ADDR_READ << SI2C_ADDR_SHIFT) + SI2C_RD);
+	vWriteByteHdmiGRL(SI2C_CTRL, (SI2C_ADDR_READ << SI2C_ADDR_SHIFT) + SI2C_CONFIRM_READ);
+	return (bReadByteHdmiGRL(HPD_DDC_STATUS) & DDC_DATA_OUT) >> DDC_DATA_OUT_SHIFT;
+}
+
 void hdmi_hdmistatus(void)
 {
 	vShowHpdRsenStatus();
@@ -2784,15 +2795,11 @@ void hdmi_hdmistatus(void)
 	/*vShowHdcpRawData();*/
 
 	vCheckHDMICLKPIN();
-	/* SCDC 0x20 = TMDS_Config we wrote, 0x21 = the sink's scrambler lock. */
-	{
-		unsigned char scdc[2] = { 0, 0 };
-		if (fgDDCDataRead(RX_REG_SCRAMBLE >> 1, RX_REG_TMDS_CONFIG, 2, scdc))
-			pr_err("[HDMI]SCDC tmds_config=0x%02x scrambler_status=0x%02x\n",
-			       scdc[0], scdc[1]);
-		else
-			pr_err("[HDMI]SCDC read failed\n");
-	}
+	/* SCDC 0x20 = TMDS_Config we wrote, 0x21 = the sink's scrambler lock.
+	 * Read through the SI2C shadow path the 2.0 core uses for its own writes.
+	 */
+	pr_err("[HDMI]SCDC tmds_config=0x%02x scrambler_status=0x%02x\n",
+	       bReadScdcReg(RX_REG_TMDS_CONFIG), bReadScdcReg(RX_REG_TMDS_CONFIG + 1));
 }
 
 unsigned int hdmi_check_status(void)

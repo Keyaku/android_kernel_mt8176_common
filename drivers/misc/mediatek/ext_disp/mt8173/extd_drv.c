@@ -1563,10 +1563,13 @@ void dpi_setting_res(u8 arg)
 			hsync_pol = HDMI_POLARITY_FALLING;
 			vsync_pol = HDMI_POLARITY_FALLING;
 
-			/* Same totals as 4K30 -- 4400 x 2250 -- at twice the rate. */
-			hsync_pulse_width = 88;
-			hsync_back_porch = 296;
-			hsync_front_porch = 176;
+			/* Same totals as 4K30 -- 4400 x 2250 -- at twice the rate.
+			 * The DPI runs dual-edge here, two pixels per clock, and its
+			 * horizontal timing counts clocks: sync and porches are halved.
+			 */
+			hsync_pulse_width = 44;
+			hsync_back_porch = 148;
+			hsync_front_porch = 88;
 
 			vsync_pulse_width = 10;
 			vsync_back_porch = 72;
