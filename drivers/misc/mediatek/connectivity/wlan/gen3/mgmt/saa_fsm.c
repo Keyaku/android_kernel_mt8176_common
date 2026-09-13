@@ -453,6 +453,8 @@ VOID saaFsmRunEventStart(IN P_ADAPTER_T prAdapter, IN P_MSG_HDR_T prMsgHdr)
 	GET_CURRENT_SYSTIME(&prStaRec->rLastJoinTime);
 
 	prStaRec->ucTxAuthAssocRetryCount = 0;
+	prStaRec->u4AssocComebackMs = 0;
+	prStaRec->ucAssocComebackCount = 0;
 
 	if (prStaRec->prChallengeText) {
 		cnmMemFree(prAdapter, prStaRec->prChallengeText);
@@ -862,6 +864,27 @@ VOID saaFsmRunEventRxAuth(IN P_ADAPTER_T prAdapter, IN P_SW_RFB_T prSwRfb)
 * @retval WLAN_STATUS_BUFFER_RETAINED   if the status code was success
 */
 /*----------------------------------------------------------------------------*/
+/*----------------------------------------------------------------------------*/
+/*!
+* @brief The association comeback delay asked for by a status-30 rejection has
+*        elapsed; send the (Re)Association Request again.
+*
+* @param[in] ulParamPtr     Pointer to the STA_RECORD_T
+*
+* @return (none)
+*/
+/*----------------------------------------------------------------------------*/
+VOID saaFsmRunEventAssocComeback(IN P_ADAPTER_T prAdapter, IN ULONG ulParamPtr)
+{
+	P_STA_RECORD_T prStaRec = (P_STA_RECORD_T) ulParamPtr;
+
+	if (!prStaRec || !prStaRec->fgIsInUse)
+		return;
+
+	saaFsmSteps(prAdapter, prStaRec, SAA_STATE_SEND_ASSOC1, (P_SW_RFB_T) NULL);
+
+}				/* end of saaFsmRunEventAssocComeback() */
+
 WLAN_STATUS saaFsmRunEventRxAssoc(IN P_ADAPTER_T prAdapter, IN P_SW_RFB_T prSwRfb)
 {
 	P_STA_RECORD_T prStaRec;
@@ -914,6 +937,35 @@ WLAN_STATUS saaFsmRunEventRxAssoc(IN P_ADAPTER_T prAdapter, IN P_SW_RFB_T prSwRf
 				DBGLOG(SAA, INFO,
 				       "Assoc Req was rejected by [" MACSTR "], StatusCode: %d\n",
 				       MAC2STR(prStaRec->aucMacAddr), u2StatusCode);
+
+				/* 802.11w: status 30 means the AP is running an SA
+				 * Query against a stale association of ours. Wait the
+				 * comeback delay and re-send the association, rather
+				 * than failing the join and re-running authentication.
+				 */
+				if (u2StatusCode == STATUS_CODE_ASSOC_REJECTED_TEMPORARILY &&
+				    prStaRec->u4AssocComebackMs > 0 &&
+				    prStaRec->ucAssocComebackCount < ASSOC_COMEBACK_RETRY_LIMIT) {
+
+					prStaRec->ucAssocComebackCount++;
+
+					DBGLOG(SAA, INFO,
+					       "Assoc comeback: retry in %u ms (%u/%u)\n",
+					       prStaRec->u4AssocComebackMs,
+					       prStaRec->ucAssocComebackCount,
+					       ASSOC_COMEBACK_RETRY_LIMIT);
+
+					prStaRec->ucTxAuthAssocRetryCount = 0;
+
+					cnmTimerInitTimer(prAdapter,
+							  &prStaRec->rTxReqDoneOrRxRespTimer,
+							  (PFN_MGMT_TIMEOUT_FUNC)
+							  saaFsmRunEventAssocComeback, (ULONG) prStaRec);
+					cnmTimerStartTimer(prAdapter,
+							   &prStaRec->rTxReqDoneOrRxRespTimer,
+							   prStaRec->u4AssocComebackMs);
+					break;
+				}
 			}
 
 			/* Reset Send Auth/(Re)Assoc Frame Count */
