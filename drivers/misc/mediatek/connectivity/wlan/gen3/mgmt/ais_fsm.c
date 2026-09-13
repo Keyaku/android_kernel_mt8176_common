@@ -41,9 +41,14 @@
 #define AIS_JOIN_TIMEOUT                    7
 
 /* Number of extra channel-grant windows a userspace SAE exchange may ask for
- * before the join is failed. The granted window was measured at 4000 ms.
+ * before the join is failed. The granted window was measured at 4000 ms, and a
+ * successful exchange takes ~70 ms, so one spare window is ample.
+ *
+ * The whole failing join must finish inside AIS_BLACKLIST_TIMEOUT, or the
+ * blacklist entry it produces ages out before the next selection reads it and
+ * the same dead BSS is chosen again, for ever.
  */
-#define AIS_SAE_CH_EXT_MAX                  3
+#define AIS_SAE_CH_EXT_MAX                  1
 
 #define CTIA_MAGIC_SSID                     "no_use_ctia_ssid"	/* "ctia_test_only_*#*#3646633#*#*" */
 #define CTIA_MAGIC_SSID_LEN                 30
