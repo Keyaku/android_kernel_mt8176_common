@@ -440,15 +440,23 @@ VOID aisFsmStateInit_JOIN(IN P_ADAPTER_T prAdapter, P_BSS_DESC_T prBssDesc)
 	 * and wait for the result on MID_MNY_AIS_EXTERNAL_AUTH. The join
 	 * timeout timer (armed from the channel grant) guards the wait.
 	 */
-	if ((prAisBssInfo->eConnectionState == PARAM_MEDIA_STATE_DISCONNECTED) &&
-	    (prConnSettings->eAuthMode == AUTH_MODE_WPA2_SAE)) {
-		prStaRec->fgIsReAssoc = FALSE;
+	if (prConnSettings->eAuthMode == AUTH_MODE_WPA2_SAE) {
+		/* A roam is a JOIN with the medium still connected. Taking the
+		 * non-SAE path there hands the auth-type chain a zero and panics
+		 * on its closing ASSERT, so SAE has to own the roam as well.
+		 */
+		prStaRec->fgIsReAssoc =
+			(prAisBssInfo->eConnectionState != PARAM_MEDIA_STATE_DISCONNECTED);
 		prStaRec->ucAuthAlgNum = (UINT_8) AUTH_ALGORITHM_NUM_SAE;
 		prStaRec->ucTxAuthAssocRetryLimit = TX_AUTH_ASSOCI_RETRY_LIMIT;
 		prStaRec->ucAuthAssocReqSeqNum = ++prAisFsmInfo->ucSeqNumOfReqMsg;
 
-		/* No driver-side auth-type retry exists for SAE. */
+		/* No driver-side auth-type retry exists for SAE. The roaming copy
+		 * must still be non-zero: it is read back on the next JOIN and a
+		 * zero there reaches an ASSERT rather than a failed association.
+		 */
 		prAisFsmInfo->ucAvailableAuthTypes = 0;
+		prAisSpecificBssInfo->ucRoamingAuthTypes = (UINT_8) AUTH_TYPE_OPEN_SYSTEM;
 
 		prAisFsmInfo->fgIsSaeExternalAuth = TRUE;
 		prAisFsmInfo->ucSaeChExtCount = 0;
@@ -537,7 +545,12 @@ VOID aisFsmStateInit_JOIN(IN P_ADAPTER_T prAdapter, P_BSS_DESC_T prBssDesc)
 
 		prStaRec->ucAuthAlgNum = (UINT_8) AUTH_ALGORITHM_NUM_FAST_BSS_TRANSITION;
 	} else {
-		ASSERT(0);
+		/* Reachable whenever a saved auth type is stale or empty. A wireless
+		 * state machine must not take the kernel down for that.
+		 */
+		DBGLOG(AIS, ERROR, "JOIN INIT: no auth type available (roaming=%d), abort join\n",
+		       prStaRec->fgIsReAssoc);
+		return;
 	}
 
 	/* 4 <5> Overwrite Connection Setting for eConnectionPolicy == ANY (Used by Assoc Req) */
