@@ -1026,8 +1026,11 @@ VOID wlanDebugInit(VOID)
 	for (i = 0; i < DBG_MODULE_NUM; i++)
 		aucDebugModule[i] = DBG_CLASS_MASK;	/* enable all */
 #else
+	/* kalPrint now reaches the kernel log, so STATE/INFO would flood it.
+	 * Raise a module with /proc/net/wlan/dbg_level when its trace is wanted.
+	 */
 	for (i = 0; i < DBG_MODULE_NUM; i++)
-		aucDebugModule[i] = DBG_CLASS_ERROR | DBG_CLASS_WARN | DBG_CLASS_STATE | DBG_CLASS_INFO;
+		aucDebugModule[i] = DBG_CLASS_ERROR | DBG_CLASS_WARN;
 
 	aucDebugModule[DBG_INTR_IDX] = DBG_CLASS_ERROR;
 #endif /* DBG */

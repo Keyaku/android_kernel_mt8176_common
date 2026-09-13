@@ -626,7 +626,10 @@ struct KAL_HALT_CTRL_T {
 #define kalGetTimeTick()                            jiffies_to_msecs(jiffies)
 
 #define WLAN_TAG                                    "[wlan]"
-#define kalPrint(_Fmt...)                           pr_debug(WLAN_TAG _Fmt)
+/* pr_debug is a no-op without CONFIG_DYNAMIC_DEBUG, which silenced every
+ * DBGLOG. Verbosity is gated at runtime by /proc/net/wlan/dbg_level instead.
+ */
+#define kalPrint(_Fmt...)                           pr_info(WLAN_TAG _Fmt)
 
 #define kalBreakPoint() \
 do { \
