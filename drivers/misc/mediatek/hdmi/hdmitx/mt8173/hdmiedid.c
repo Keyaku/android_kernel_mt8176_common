@@ -226,6 +226,10 @@ void vClearEdidInfo(void)
 	_HdmiSinkAvCap.ui4_sink_hdmi_4k2kvic = 0;
 	_HdmiSinkAvCap.b_sink_SCDC_present = 0;
 	_HdmiSinkAvCap.b_sink_LTE_340M_sramble = 0;
+	/* The rate is taken as a maximum across both vendor blocks, so it has
+	 * to start from zero or a previous sink's higher rate would survive.
+	 */
+	_HdmiSinkAvCap.ui1_sink_max_tmds_clock = 0;
 
 	_HdmiSinkAvCap.ui1_CNC = 0;
 
@@ -537,6 +541,10 @@ void vSetEdidChkError(void)
 	_HdmiSinkAvCap.ui4_sink_hdmi_4k2kvic = 0;
 	_HdmiSinkAvCap.b_sink_SCDC_present = 0;
 	_HdmiSinkAvCap.b_sink_LTE_340M_sramble = 0;
+	/* The rate is taken as a maximum across both vendor blocks, so it has
+	 * to start from zero or a previous sink's higher rate would survive.
+	 */
+	_HdmiSinkAvCap.ui1_sink_max_tmds_clock = 0;
 }
 
 void vParserCEADataBlock(unsigned char *prData, unsigned char bLen)
@@ -866,30 +874,52 @@ void vParserCEADataBlock(unsigned char *prData, unsigned char bLen)
 			}	/* for(bIdx = 0; bIdx < bNo/3; bIdx++) */
 		} else if (bType == 0x04)	/* speaker allocation tag code, 0x04 */
 			_HdmiSinkAvCap.ui1_sink_spk_allocation = *(prData + 1) & 0x7f;
-	else if (bType == 0x03) {	/* VDSB exit */
-	for (bTemp = 0; bTemp < EDID_VSDB_LEN; bTemp++) {
-		if (*(prData + bTemp + 1) != aEDIDVSDBHeader[bTemp]) {
-			if (*(prData + bTemp + 1) == aEDIDHFVSDBHeader[bTemp]) {
-				if (bTemp == EDID_VSDB_LEN) {
-					vSetSharedInfo(SI_EDID_VSDB_EXIST, TRUE);
-					_HdmiSinkAvCap.b_sink_support_hdmi_mode =
-					TRUE;
-					bTemp13 = *(prData + 6);
-					if (bTemp13 & 0x80) {
-						_HdmiSinkAvCap.b_sink_SCDC_present =
-							   TRUE;
-					if (bTemp13 & 0x08)
-						_HdmiSinkAvCap.
-						b_sink_LTE_340M_sramble
-						= TRUE;
-					}
-				}
+	else if (bType == 0x03) {	/* VSDB */
+	unsigned char bHfIdx;
 
-			}
+	/* Match the OUI against both vendor blocks. A 2.0 sink publishes the
+	 * HDMI Forum block alongside the legacy one, and only the Forum block
+	 * carries the rates and SCDC needed above 340 Mcsc.
+	 */
+	for (bTemp = 0; bTemp < EDID_VSDB_LEN; bTemp++)
+		if (*(prData + bTemp + 1) != aEDIDVSDBHeader[bTemp])
+			break;
 
+	if (bTemp != EDID_VSDB_LEN) {
+		for (bHfIdx = 0; bHfIdx < EDID_VSDB_LEN; bHfIdx++)
+			if (*(prData + bHfIdx + 1) != aEDIDHFVSDBHeader[bHfIdx])
 				break;
-				}
+
+		if (bHfIdx == EDID_VSDB_LEN) {
+			vSetSharedInfo(SI_EDID_VSDB_EXIST, TRUE);
+			_HdmiSinkAvCap.b_sink_support_hdmi_mode = TRUE;
+
+			/* Byte 5 is Max_TMDS_Character_Rate in 5 MHz units and
+			 * supersedes the legacy byte, which a 2.0 sink keeps at
+			 * 300 or below for the benefit of 1.4 sources.
+			 */
+			if ((bNo >= 5) && (*(prData + 5) != 0)) {
+				unsigned short u2HfRate =
+					((unsigned short)(*(prData + 5))) * 5;
+
+				if (u2HfRate > _HdmiSinkAvCap.ui1_sink_max_tmds_clock)
+					_HdmiSinkAvCap.ui1_sink_max_tmds_clock = u2HfRate;
 			}
+
+			/* Byte 6: bit7 SCDC_Present, bit3 LTE_340Mcsc_scramble.
+			 * These are independent bits; the old code nested the
+			 * second inside the first.
+			 */
+			if (bNo >= 6) {
+				bTemp13 = *(prData + 6);
+				if (bTemp13 & 0x80)
+					_HdmiSinkAvCap.b_sink_SCDC_present = TRUE;
+				if (bTemp13 & 0x08)
+					_HdmiSinkAvCap.b_sink_LTE_340M_sramble = TRUE;
+			}
+		}
+	}
+
 			/* for loop to end, is. VSDB header match */
 			if (bTemp == EDID_VSDB_LEN) {
 				vSetSharedInfo(SI_EDID_VSDB_EXIST, TRUE);
@@ -933,12 +963,16 @@ void vParserCEADataBlock(unsigned char *prData, unsigned char bLen)
 
 				/* max tmds clock */
 				if (bNo >= 7) {
+					unsigned short u2LegacyRate;
+
 					bTemp = *(prData + 7);
-					_HdmiSinkAvCap.ui1_sink_max_tmds_clock =
-					    ((unsigned short)bTemp) * 5;
-					/* _HdmiSinkAvCap.ui1_sink_max_tmds_clock = 190; */
-				} else {
-					_HdmiSinkAvCap.ui1_sink_max_tmds_clock = 0;
+					u2LegacyRate = ((unsigned short)bTemp) * 5;
+					/* Blocks arrive in EDID order, so this must not
+					 * undo a higher rate already taken from the
+					 * HDMI Forum block.
+					 */
+					if (u2LegacyRate > _HdmiSinkAvCap.ui1_sink_max_tmds_clock)
+						_HdmiSinkAvCap.ui1_sink_max_tmds_clock = u2LegacyRate;
 				}
 
 				/* Read Latency data */
