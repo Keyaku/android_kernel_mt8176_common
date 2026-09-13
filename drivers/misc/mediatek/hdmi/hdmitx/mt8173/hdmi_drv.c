@@ -2564,14 +2564,20 @@ static int hdmi_pwrpin_show(struct seq_file *s, void *unused)
 	 * reading; hpd= is the raw CEC pair and rx_event= carries the plug
 	 * interrupt-enable bits.
 	 */
+	/* sink4k2k= is the sink's own 4K VIC mask from its EDID (SINK_2160P_*).
+	 * It is the only honest answer to "will this sink take an ultra mode":
+	 * a refusing sink still registers the display and still reports a
+	 * session, so nothing downstream can tell a working 4K from a blank one.
+	 */
 	seq_printf(s,
-		   "pin=%d value=%d powerenable=%zu clockenable=%zu hotplug=%zu ready=%d hpd=0x%02x rx_event=0x%08x\n",
+		   "pin=%d value=%d powerenable=%zu clockenable=%zu hotplug=%zu ready=%d hpd=0x%02x rx_event=0x%08x sink4k2k=0x%08x\n",
 		   hdmi_power_control_pin, gpio_get_value(hdmi_power_control_pin),
 		   hdmi_powerenable, hdmi_clockenable, hdmi_hotplugstate,
 		   (hdmi_powerenable == 1) && (hdmi_clockenable == 1)
 		   && (hdmi_hotplugstate == HDMI_STATE_HOT_PLUGIN_AND_POWER_ON)
 		   && hdmi_plugin_ready,
-		   hdmi_get_port_hpd_value(), hdmi_cec_read(RX_EVENT));
+		   hdmi_get_port_hpd_value(), hdmi_cec_read(RX_EVENT),
+		   _HdmiSinkAvCap.ui4_sink_hdmi_4k2kvic);
 	return 0;
 }
 
