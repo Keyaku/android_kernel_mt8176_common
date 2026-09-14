@@ -11,6 +11,7 @@
 #include <linux/interrupt.h>
 #include <linux/suspend.h>
 #include <linux/syscore_ops.h>
+#include <linux/wakeup_reason.h>
 
 #include "internals.h"
 
@@ -21,6 +22,9 @@ bool irq_pm_check_wakeup(struct irq_desc *desc)
 		desc->istate |= IRQS_SUSPENDED | IRQS_PENDING;
 		desc->depth++;
 		irq_disable(desc);
+		/* Without this, last_resume_reason stays empty and every
+		 * resume is reported as "unknown". */
+		log_wakeup_reason(desc->irq_data.irq);
 		pm_system_wakeup();
 		return true;
 	}
